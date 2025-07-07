@@ -2121,9 +2121,20 @@ async function viewHarvestedPage(id) {
   }
   
   if (page) {
-    // Open in new tab or modal
+    // Use blob URL instead of data URL for security
     const html = page.cleanedHTML || page.html;
-    window.open(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    
+    // Open in new tab
+    const newTab = window.open(url, '_blank');
+    
+    // Clean up blob URL after the tab loads
+    if (newTab) {
+      newTab.addEventListener('load', () => {
+        setTimeout(() => URL.revokeObjectURL(url), 100);
+      });
+    }
   } else {
     showStatus('Page not found', 'error');
   }
