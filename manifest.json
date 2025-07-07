@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Sortlist URL Harvester",
+  "name": "Web Data Collector",
   "version": "1.0",
   "description": "Collects company URLs from Sortlist as you browse",
   "permissions": [
@@ -18,8 +18,15 @@
     "*://*.sortlist.us/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["stealth-utils.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "content_scripts": [
     {
       "matches": [
@@ -29,7 +36,7 @@
         "*://*.sortlist.co.uk/*",
         "*://*.sortlist.us/*"
       ],
-      "js": ["content.js"],
+      "js": ["content-stealth.js", "content.js"],
       "run_at": "document_idle"
     },
     {

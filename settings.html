@@ -89,10 +89,57 @@
       padding: 15px;
       margin: 20px 0;
     }
+    
+    .warning {
+      background: #fff3cd;
+      border-left: 4px solid #ffc107;
+      padding: 15px;
+      margin: 20px 0;
+    }
   </style>
 </head>
 <body>
-  <h1>⚙️ Sortlist Harvester Settings</h1>
+  <h1>⚙️ Extension Settings</h1>
+  
+  <!-- Stealth Mode Settings -->
+  <div class="setting-group">
+    <h3>🥷 Stealth Mode</h3>
+    
+    <div class="setting-item">
+      <label for="stealthMode">Enable stealth mode</label>
+      <input type="checkbox" id="stealthMode" checked>
+    </div>
+    
+    <div class="setting-item">
+      <label for="debugMode">Debug mode (verbose logging)</label>
+      <input type="checkbox" id="debugMode">
+    </div>
+    
+    <div class="setting-item">
+      <label for="minDelay">Min delay between requests (seconds)</label>
+      <input type="number" id="minDelay" value="20" min="10" max="300">
+    </div>
+    
+    <div class="setting-item">
+      <label for="maxDelay">Max delay between requests (seconds)</label>
+      <input type="number" id="maxDelay" value="60" min="20" max="600">
+    </div>
+    
+    <div class="setting-item">
+      <label for="enableHumanSimulation">Simulate human behavior</label>
+      <input type="checkbox" id="enableHumanSimulation" checked>
+    </div>
+    
+    <div class="setting-item">
+      <label for="enableRateLimiting">Smart rate limiting</label>
+      <input type="checkbox" id="enableRateLimiting" checked>
+    </div>
+    
+    <div class="setting-item">
+      <label for="maxRequestsPerHour">Max requests per hour</label>
+      <input type="number" id="maxRequestsPerHour" value="100" min="10" max="500">
+    </div>
+  </div>
   
   <div class="setting-group">
     <h3>Auto-Save Options</h3>
@@ -149,6 +196,11 @@
       <label for="serverUrl">Server URL</label>
       <input type="text" id="serverUrl" value="http://localhost:3000" style="width: 200px;">
     </div>
+  </div>
+  
+  <div class="warning">
+    <strong>⚠️ Stealth Mode:</strong> These settings help avoid detection and blocking. 
+    Use responsibly and respect website terms of service.
   </div>
   
   <div class="info">

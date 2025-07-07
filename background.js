@@ -102,11 +102,12 @@ function toggleCollectionTag(tagId, enabled) {
   }
 }
 
-// Import storage manager
+// Import storage manager and stealth utilities
 try {
   importScripts('storage_manager.js');
+  importScripts('stealth-utils.js');
 } catch (e) {
-  console.log('StorageManager not loaded, using basic storage');
+  console.log('Some modules not loaded:', e);
 }
 
 const storageManager = typeof StorageManager !== 'undefined' ? new StorageManager() : null;
@@ -285,6 +286,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         stats: siteMap.getSiteStatistics(),
         success: true
       });
+      break;
+      
+    case 'blockingDetected':
+      handleBlockingDetection(request);
+      sendResponse({ success: true });
       break;
       
     default:
@@ -548,16 +554,24 @@ async function getSettings() {
   }
 }
 
-// Auto-save with better logic
-setInterval(() => {
-  // Save data if we have any companies (remove the 100 limit that was preventing saves!)
-  if (collectedData.companies.length > 0) {
-    console.log(`💾 Auto-saving ${collectedData.companies.length} companies...`);
-    saveData().catch(error => {
-      console.error('❌ Save failed:', error);
-    });
-  }
-}, 30000); // Every 30 seconds
+// Auto-save with randomized intervals
+let autoSaveInterval;
+function scheduleAutoSave() {
+  const baseInterval = 30000; // 30 seconds
+  const nextInterval = window.StealthUtils ? StealthUtils.randomDelay(baseInterval, 0.3) : baseInterval;
+  
+  autoSaveInterval = setTimeout(() => {
+    if (collectedData.companies.length > 0) {
+      const log = window.StealthUtils ? StealthUtils.stealthLog : console;
+      log.log(`💾 Auto-saving ${collectedData.companies.length} companies...`);
+      saveData().catch(error => {
+        log.error('❌ Save failed:', error);
+      });
+    }
+    scheduleAutoSave(); // Schedule next save
+  }, nextInterval);
+}
+scheduleAutoSave();
 
 // URL normalization functions
 function normalizeUrl(url) {
@@ -629,26 +643,45 @@ function isNavigationUrl(url) {
   return navPatterns.some(pattern => url.toLowerCase().includes(pattern));
 }
 
+// Rate limiter instance
+const rateLimiter = window.StealthUtils ? new StealthUtils.RateLimiter() : null;
+
+// Auto-browse with stealth enhancements
 function startAutoBrowse(settings = {}) {
-  console.log('Starting auto-browse...');
+  const log = window.StealthUtils ? StealthUtils.stealthLog : console;
+  log.log('Starting auto-browse with stealth mode...');
   
   // Update settings
   autoBrowseState.interval = settings.interval || 30000;
   autoBrowseState.enabled = true;
   
-  // Start browsing
-  browseNextUrl();
+  // Start browsing with initial delay
+  scheduleNextBrowse();
+}
+
+// Schedule next browse with randomized timing
+function scheduleNextBrowse() {
+  if (!autoBrowseState.enabled) return;
   
-  // Set up interval
+  // Clear any existing interval
   if (autoBrowseState.intervalId) {
-    clearInterval(autoBrowseState.intervalId);
+    clearTimeout(autoBrowseState.intervalId);
   }
   
-  autoBrowseState.intervalId = setInterval(() => {
+  // Calculate next delay with randomization
+  const baseDelay = autoBrowseState.interval;
+  const nextDelay = window.StealthUtils ? 
+    StealthUtils.randomDelay(baseDelay, 0.4) : baseDelay;
+  
+  const log = window.StealthUtils ? StealthUtils.stealthLog : console;
+  log.info(`Next browse in ${nextDelay}ms`);
+  
+  autoBrowseState.intervalId = setTimeout(async () => {
     if (autoBrowseState.enabled) {
-      browseNextUrl();
+      await browseNextUrl();
+      scheduleNextBrowse(); // Schedule next
     }
-  }, autoBrowseState.interval);
+  }, nextDelay);
 }
 
 function stopAutoBrowse() {
@@ -662,10 +695,11 @@ function stopAutoBrowse() {
 }
 
 async function browseNextUrl() {
+  const log = window.StealthUtils ? StealthUtils.stealthLog : console;
   const unvisitedUrls = getUnvisitedUrls();
   
   if (unvisitedUrls.length === 0) {
-    console.log('No more unvisited URLs');
+    log.log('No more unvisited URLs');
     stopAutoBrowse();
     
     // Notify dashboard that auto-browse completed
@@ -677,11 +711,25 @@ async function browseNextUrl() {
     return;
   }
   
-  // Get next URL (prioritized: collection pages first)
-  const company = unvisitedUrls[0]; // Always take first from prioritized list
+  // Get next URL
+  const company = unvisitedUrls[0];
   const isCollection = isCollectionUrl(company.url);
   
-  console.log(`🤖 Auto-browsing ${isCollection ? '🏷️ COLLECTION' : '📄 individual'} page:`, company.url, `(${autoBrowseState.visitedUrls.size + 1}/${collectedData.companies.length})`);
+  // Apply rate limiting if available
+  if (rateLimiter) {
+    try {
+      const urlObj = new URL(company.url);
+      const delay = await rateLimiter.getDelay(urlObj.hostname);
+      if (delay > autoBrowseState.interval) {
+        log.info(`Rate limiting: waiting ${delay}ms for ${urlObj.hostname}`);
+        await new Promise(resolve => setTimeout(resolve, delay - autoBrowseState.interval));
+      }
+    } catch (e) {
+      log.error('Rate limiter error:', e);
+    }
+  }
+  
+  log.log(`🤖 Auto-browsing ${isCollection ? '🏷️ COLLECTION' : '📄 individual'} page:`, company.url, `(${autoBrowseState.visitedUrls.size + 1}/${collectedData.companies.length})`);
   
   try {
     // Normalize URL for deduplication
@@ -728,15 +776,19 @@ async function browseNextUrl() {
       pageType: isCollection ? 'Collection' : 'Individual'
     }).catch(() => {});
     
-    // Wait longer for content scripts to load and extract data
+    // Wait with randomized duration for content extraction
+    const baseTabDuration = 15000; // 15 seconds base
+    const tabDuration = window.StealthUtils ? 
+      StealthUtils.randomDelay(baseTabDuration, 0.4) : baseTabDuration;
+    
     setTimeout(async () => {
       try {
-        console.log('🗑️ Closing auto-browse tab:', tab.id, 'after extraction');
+        log.log('🗑️ Closing auto-browse tab:', tab.id, `after ${tabDuration}ms`);
         await chrome.tabs.remove(tab.id);
       } catch (e) {
-        console.log('Tab already closed:', tab.id);
+        log.log('Tab already closed:', tab.id);
       }
-    }, 15000); // Increased to 15 seconds to ensure content scripts have time to run
+    }, tabDuration);
     
   } catch (error) {
     console.error('Error auto-browsing URL:', error);
@@ -908,4 +960,43 @@ class SiteMap {
 // Global site map instance
 const siteMap = new SiteMap();
 
-console.log('Background script initialized with intelligent site mapping');
+// Blocking detection handler
+function handleBlockingDetection(request) {
+  const log = window.StealthUtils ? StealthUtils.stealthLog : console;
+  log.warn('🚫 Blocking detected:', request);
+  
+  // Stop auto-browse if running
+  if (autoBrowseState.enabled) {
+    log.info('Pausing auto-browse due to blocking detection');
+    autoBrowseState.enabled = false;
+    
+    // Notify dashboard
+    chrome.runtime.sendMessage({
+      action: 'autoBrowseUpdate',
+      status: 'paused',
+      reason: 'Blocking detected',
+      url: request.url
+    }).catch(() => {});
+    
+    // Schedule resume after cooldown
+    const cooldown = request.cooldownTime || 300000; // 5 min default
+    setTimeout(() => {
+      log.info('Attempting to resume after cooldown');
+      if (!autoBrowseState.enabled && collectedData.companies.length > 0) {
+        autoBrowseState.enabled = true;
+        scheduleNextBrowse();
+      }
+    }, cooldown);
+  }
+  
+  // Update badge to show warning
+  chrome.action.setBadgeText({ text: '!' });
+  chrome.action.setBadgeBackgroundColor({ color: '#FFA500' });
+  
+  // Reset badge after cooldown
+  setTimeout(() => {
+    updateBadge();
+  }, 30000);
+}
+
+console.log('Background script initialized with intelligent site mapping and stealth features');

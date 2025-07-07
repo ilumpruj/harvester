@@ -2,6 +2,15 @@
 
 // Default settings
 const defaultSettings = {
+  // Stealth settings
+  stealthMode: true,
+  debugMode: false,
+  minDelay: 20,
+  maxDelay: 60,
+  enableHumanSimulation: true,
+  enableRateLimiting: true,
+  maxRequestsPerHour: 100,
+  // Original settings
   autoSave: true,
   autoSaveInterval: 30,
   autoExport: true,
@@ -18,6 +27,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const settings = await loadSettings();
   
   // Apply settings to UI
+  // Stealth settings
+  document.getElementById('stealthMode').checked = settings.stealthMode;
+  document.getElementById('debugMode').checked = settings.debugMode;
+  document.getElementById('minDelay').value = settings.minDelay;
+  document.getElementById('maxDelay').value = settings.maxDelay;
+  document.getElementById('enableHumanSimulation').checked = settings.enableHumanSimulation;
+  document.getElementById('enableRateLimiting').checked = settings.enableRateLimiting;
+  document.getElementById('maxRequestsPerHour').value = settings.maxRequestsPerHour;
+  // Original settings
   document.getElementById('autoSave').checked = settings.autoSave;
   document.getElementById('autoSaveInterval').value = settings.autoSaveInterval;
   document.getElementById('autoExport').checked = settings.autoExport;
@@ -32,6 +50,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Save settings
 document.getElementById('saveSettings').addEventListener('click', async () => {
   const settings = {
+    // Stealth settings
+    stealthMode: document.getElementById('stealthMode').checked,
+    debugMode: document.getElementById('debugMode').checked,
+    minDelay: parseInt(document.getElementById('minDelay').value),
+    maxDelay: parseInt(document.getElementById('maxDelay').value),
+    enableHumanSimulation: document.getElementById('enableHumanSimulation').checked,
+    enableRateLimiting: document.getElementById('enableRateLimiting').checked,
+    maxRequestsPerHour: parseInt(document.getElementById('maxRequestsPerHour').value),
+    // Original settings
     autoSave: document.getElementById('autoSave').checked,
     autoSaveInterval: parseInt(document.getElementById('autoSaveInterval').value),
     autoExport: document.getElementById('autoExport').checked,
