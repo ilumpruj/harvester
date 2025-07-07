@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local test data
+test-data/
+*.test.json
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Extension build files (if any)
+dist/
+build/
+
+# Local configuration
+.env
+.env.local
+
+# Chrome extension private key
+*.pem
+
+# Backup files
+*.backup
+*.bak
+
+# Test coverage
+coverage/
+.nyc_output/

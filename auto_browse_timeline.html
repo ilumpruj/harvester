@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Browse Flow Timeline</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        
+        .timeline {
+            position: relative;
+            padding: 20px 0;
+            margin: 20px auto;
+            max-width: 1200px;
+        }
+        
+        .timeline-line {
+            position: absolute;
+            left: 50px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #4CAF50;
+        }
+        
+        .event {
+            position: relative;
+            margin: 10px 0;
+            padding-left: 80px;
+            min-height: 60px;
+        }
+        
+        .event-time {
+            position: absolute;
+            left: 0;
+            top: 20px;
+            width: 40px;
+            text-align: right;
+            font-size: 12px;
+            color: #666;
+            font-weight: bold;
+        }
+        
+        .event-marker {
+            position: absolute;
+            left: 44px;
+            top: 22px;
+            width: 12px;
+            height: 12px;
+            background: #4CAF50;
+            border-radius: 50%;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .event-content {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-left: 20px;
+        }
+        
+        .event-title {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .event-description {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .event-code {
+            background: #f4f4f4;
+            padding: 8px;
+            margin-top: 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+        }
+        
+        .event-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        
+        .type-user { background: #2196F3; color: white; }
+        .type-background { background: #FF9800; color: white; }
+        .type-content { background: #9C27B0; color: white; }
+        .type-chrome { background: #607D8B; color: white; }
+        .type-data { background: #4CAF50; color: white; }
+        
+        .legend {
+            margin: 20px auto;
+            max-width: 1200px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .legend-item {
+            display: inline-block;
+            margin-right: 20px;
+        }
+        
+        .flow-diagram {
+            margin: 40px auto;
+            max-width: 1200px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .flow-step {
+            display: inline-block;
+            background: #f0f0f0;
+            padding: 10px 15px;
+            margin: 5px;
+            border-radius: 5px;
+            position: relative;
+        }
+        
+        .flow-arrow {
+            display: inline-block;
+            margin: 0 10px;
+            color: #4CAF50;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Chrome Extension Auto-Browse Flow Timeline</h1>
+    
+    <div class="legend">
+        <strong>Legend:</strong>
+        <span class="legend-item"><span class="event-type type-user">USER</span> User Action</span>
+        <span class="legend-item"><span class="event-type type-background">BACKGROUND</span> Background Script</span>
+        <span class="legend-item"><span class="event-type type-content">CONTENT</span> Content Script</span>
+        <span class="legend-item"><span class="event-type type-chrome">CHROME</span> Chrome API</span>
+        <span class="legend-item"><span class="event-type type-data">DATA</span> Data Flow</span>
+    </div>
+    
+    <div class="timeline">
+        <div class="timeline-line"></div>
+        
+        <div class="event">
+            <div class="event-time">0ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">User Starts Auto-Browse <span class="event-type type-user">USER</span></div>
+                <div class="event-description">User clicks "Start Auto-Browsing" button in dashboard</div>
+                <div class="event-code">
+                    chrome.runtime.sendMessage({action: 'startAutoBrowse', settings: {interval: 30000}})
+                </div>
+            </div>
+        </div>
+        
+        <div class="event">
+            <div class="event-time">5ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">Background Receives Command <span class="event-type type-background">BACKGROUND</span></div>
+                <div class="event-description">Message listener processes startAutoBrowse action</div>
+                <div class="event-code">
+                    console.log('Starting auto-browse...');<br>
+                    browseNextUrl(); // Immediate execution
+                </div>
+            </div>
+        </div>
+        
+        <div class="event">
+            <div class="event-time">10ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">URL Selection & Analysis <span class="event-type type-background">BACKGROUND</span></div>
+                <div class="event-description">Selects next unvisited URL from priority queue (collection pages first)</div>
+                <div class="event-code">
+                    console.log('🤖 Auto-browsing 🏷️ COLLECTION page: https://www.sortlist.com/agencies/web-development (1/150)');
+                </div>
+            </div>
+        </div>
+        
+        <div class="event">
+            <div class="event-time">50ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">Tab Creation <span class="event-type type-chrome">CHROME</span></div>
+                <div class="event-description">Chrome creates new background tab for URL</div>
+                <div class="event-code">
+                    chrome.tabs.create({url: company.url, active: false});<br>
+                    console.log('📄 Opened tab: 12345 for URL: https://www.sortlist.com/...');
+                </div>
+            </div>
+        </div>
+        
+        <div class="event">
+            <div class="event-time">100ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">Content Scripts Injection <span class="event-type type-chrome">CHROME</span></div>
+                <div class="event-description">Both content.js and universal-content.js are injected into the tab</div>
+                <div class="event-code">
+                    content.js: "🔗 Sortlist URL Harvester: Active on..."<br>
+                    universal-content.js: "🌐 Universal harvester active on..."
+                </div>
+            </div>
+        </div>
+        
+        <div class="event">
+            <div class="event-time">100-2000ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">Page Loading <span class="event-type type-content">CONTENT</span></div>
+                <div class="event-description">Content scripts wait for page to fully load</div>
+                <div class="event-code">
+                    console.log('⏳ Waiting for page to load...');<br>
+                    // Waits for: load event, readyState complete, or 3s timeout
+                </div>
+            </div>
+        </div>
+        
+        <div class="event">
+            <div class="event-time">2100ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">URL Extraction Begins <span class="event-type type-content">CONTENT</span></div>
+                <div class="event-description">Content script searches DOM for company URLs</div>
+                <div class="event-code">
+                    // Searches for patterns: /agency/, /agencies/, /company/, etc.<br>
+                    console.log('📊 Extracted data:', {company_urls: 48, total_links: 245});
+                </div>
+            </div>
+        </div>
+        
+        <div class="event">
+            <div class="event-time">2150ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">Data Transmission <span class="event-type type-data">DATA</span></div>
+                <div class="event-description">Extracted URLs sent to background script</div>
+                <div class="event-code">
+                    chrome.runtime.sendMessage({<br>
+                    &nbsp;&nbsp;action: 'urlsExtracted',<br>
+                    &nbsp;&nbsp;data: {companies: [...], pageInfo: {...}}<br>
+                    });
+                </div>
+            </div>
+        </div>
+        
+        <div class="event">
+            <div class="event-time">2200ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">Data Processing <span class="event-type type-background">BACKGROUND</span></div>
+                <div class="event-description">Background script deduplicates and stores URLs</div>
+                <div class="event-code">
+                    console.log('✅ Added 45 new companies from main-content-script');<br>
+                    // Normalizes URLs, checks duplicates, saves to storage
+                </div>
+            </div>
+        </div>
+        
+        <div class="event">
+            <div class="event-time">2250ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">UI Updates <span class="event-type type-data">DATA</span></div>
+                <div class="event-description">Badge count updated, dashboard notified</div>
+                <div class="event-code">
+                    chrome.action.setBadgeText({text: '198'});<br>
+                    // Sends autoBrowseUpdate message to dashboard
+                </div>
+            </div>
+        </div>
+        
+        <div class="event">
+            <div class="event-time">3000ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">DOM Observer Setup <span class="event-type type-content">CONTENT</span></div>
+                <div class="event-description">Mutation observer watches for dynamic content changes</div>
+                <div class="event-code">
+                    console.log('👁️ Started observing DOM changes for dynamic content');
+                </div>
+            </div>
+        </div>
+        
+        <div class="event">
+            <div class="event-time">15000ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">Tab Closure <span class="event-type type-background">BACKGROUND</span></div>
+                <div class="event-description">Background script closes tab after extraction complete</div>
+                <div class="event-code">
+                    console.log('🗑️ Closing auto-browse tab: 12345 after extraction');<br>
+                    chrome.tabs.remove(tab.id);
+                </div>
+            </div>
+        </div>
+        
+        <div class="event">
+            <div class="event-time">30000ms</div>
+            <div class="event-marker"></div>
+            <div class="event-content">
+                <div class="event-title">Next Cycle Begins <span class="event-type type-background">BACKGROUND</span></div>
+                <div class="event-description">Interval timer triggers next URL processing</div>
+                <div class="event-code">
+                    // Process repeats with next URL in queue<br>
+                    browseNextUrl(); // Selects next unvisited URL
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="flow-diagram">
+        <h2>Simplified Flow</h2>
+        <div style="text-align: center;">
+            <div class="flow-step">User Action</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-step">Background Script</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-step">Create Tab</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-step">Inject Scripts</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-step">Wait for Load</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-step">Extract URLs</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-step">Send Data</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-step">Process & Store</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-step">Update UI</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-step">Close Tab</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-step">Wait 30s</div>
+            <span class="flow-arrow">↻</span>
+        </div>
+    </div>
+    
+    <script>
+        // Add some interactivity
+        document.querySelectorAll('.event').forEach(event => {
+            event.addEventListener('click', function() {
+                this.querySelector('.event-content').style.transform = 'scale(1.02)';
+                setTimeout(() => {
+                    this.querySelector('.event-content').style.transform = 'scale(1)';
+                }, 200);
+            });
+        });
+    </script>
+</body>
+</html>

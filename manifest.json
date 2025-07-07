@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "Sortlist URL Harvester",
+  "version": "1.0",
+  "description": "Collects company URLs from Sortlist as you browse",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "tabs",
+    "downloads",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "*://*.sortlist.com/*",
+    "*://*.sortlist.be/*",
+    "*://*.sortlist.fr/*",
+    "*://*.sortlist.co.uk/*",
+    "*://*.sortlist.us/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.sortlist.com/*",
+        "*://*.sortlist.be/*", 
+        "*://*.sortlist.fr/*",
+        "*://*.sortlist.co.uk/*",
+        "*://*.sortlist.us/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["universal-content.js", "emergency-clear.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

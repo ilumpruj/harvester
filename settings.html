@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Sortlist Harvester Settings</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 20px;
+    }
+    
+    h1 {
+      color: #333;
+      border-bottom: 2px solid #4CAF50;
+      padding-bottom: 10px;
+    }
+    
+    .setting-group {
+      margin: 20px 0;
+      padding: 20px;
+      background: #f5f5f5;
+      border-radius: 8px;
+    }
+    
+    .setting-group h3 {
+      margin-top: 0;
+      color: #4CAF50;
+    }
+    
+    .setting-item {
+      margin: 15px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    label {
+      flex: 1;
+      margin-right: 10px;
+    }
+    
+    input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+    }
+    
+    input[type="number"], input[type="text"] {
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      width: 100px;
+    }
+    
+    .save-button {
+      background: #4CAF50;
+      color: white;
+      padding: 12px 30px;
+      border: none;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    
+    .save-button:hover {
+      background: #45a049;
+    }
+    
+    .status {
+      margin-top: 20px;
+      padding: 10px;
+      border-radius: 4px;
+      text-align: center;
+      display: none;
+    }
+    
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    
+    .info {
+      background: #e7f3ff;
+      border-left: 4px solid #2196F3;
+      padding: 15px;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>⚙️ Sortlist Harvester Settings</h1>
+  
+  <div class="setting-group">
+    <h3>Auto-Save Options</h3>
+    
+    <div class="setting-item">
+      <label for="autoSave">Enable auto-save</label>
+      <input type="checkbox" id="autoSave" checked>
+    </div>
+    
+    <div class="setting-item">
+      <label for="autoSaveInterval">Auto-save interval (seconds)</label>
+      <input type="number" id="autoSaveInterval" value="30" min="10" max="300">
+    </div>
+    
+    <div class="setting-item">
+      <label for="autoExport">Auto-export to downloads</label>
+      <input type="checkbox" id="autoExport" checked>
+    </div>
+    
+    <div class="setting-item">
+      <label for="exportThreshold">Export every X companies</label>
+      <input type="number" id="exportThreshold" value="50" min="10" max="500">
+    </div>
+  </div>
+  
+  <div class="setting-group">
+    <h3>Storage Options</h3>
+    
+    <div class="setting-item">
+      <label for="useIndexedDB">Use IndexedDB for large storage</label>
+      <input type="checkbox" id="useIndexedDB" checked>
+    </div>
+    
+    <div class="setting-item">
+      <label for="keepBackups">Keep backups (last 5)</label>
+      <input type="checkbox" id="keepBackups" checked>
+    </div>
+    
+    <div class="setting-item">
+      <label for="savePageHTML">Save full page HTML</label>
+      <input type="checkbox" id="savePageHTML">
+    </div>
+  </div>
+  
+  <div class="setting-group">
+    <h3>Server Sync (Optional)</h3>
+    
+    <div class="setting-item">
+      <label for="enableServer">Send to local server</label>
+      <input type="checkbox" id="enableServer">
+    </div>
+    
+    <div class="setting-item">
+      <label for="serverUrl">Server URL</label>
+      <input type="text" id="serverUrl" value="http://localhost:3000" style="width: 200px;">
+    </div>
+  </div>
+  
+  <div class="info">
+    <strong>💡 Tip:</strong> Data is automatically saved to Chrome's local storage and survives browser restarts. 
+    Enable auto-export to get regular JSON files in your Downloads folder.
+  </div>
+  
+  <button class="save-button" id="saveSettings">Save Settings</button>
+  
+  <div id="status" class="status"></div>
+  
+  <script src="settings.js"></script>
+</body>
+</html>
