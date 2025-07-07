@@ -198,5 +198,5 @@ class StorageManager {
 
 // Export for use in background.js
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = StorageManager;
+  module.exports = ExtensionStorageManager;
 }

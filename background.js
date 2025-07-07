@@ -110,7 +110,7 @@ try {
   console.log('Some modules not loaded:', e);
 }
 
-const storageManager = typeof StorageManager !== 'undefined' ? new StorageManager() : null;
+const storageManager = typeof ExtensionStorageManager !== 'undefined' ? new ExtensionStorageManager() : null;
 
 // Initialize - load existing data from storage
 async function initialize() {

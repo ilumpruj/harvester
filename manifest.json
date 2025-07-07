@@ -18,8 +18,7 @@
     "*://*.sortlist.us/*"
   ],
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
   "web_accessible_resources": [
     {
@@ -36,7 +35,7 @@
         "*://*.sortlist.co.uk/*",
         "*://*.sortlist.us/*"
       ],
-      "js": ["content-stealth.js", "content.js"],
+      "js": ["content.js"],
       "run_at": "document_idle"
     },
     {
