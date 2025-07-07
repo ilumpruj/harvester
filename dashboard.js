@@ -64,6 +64,21 @@ function listenForUpdates() {
       addToActivityLog('🎉 Auto-browse completed! All URLs visited.');
       showStatus(message.message, 'success');
       updateAutoBrowseStats();
+    } else if (message.action === 'pageHarvested') {
+      // Store harvested page in IndexedDB
+      handlePageHarvested(message.data);
+    } else if (message.action === 'harvesterAutoBrowseUpdate') {
+      // Update harvester-specific UI
+      updateHarvesterAutoBrowseDisplay(message);
+      if (message.nextRequestDelay) {
+        startStealthCountdown(message.nextRequestDelay);
+      }
+    } else if (message.action === 'harvesterAutoBrowseComplete') {
+      console.log('🎉 Harvester auto-browse completed');
+      addToActivityLog('🎉 Harvester auto-browse completed! All pages harvested.');
+      showStatus('Harvester auto-browse completed!', 'success');
+      updateHarvesterAutoBrowseUI();
+      loadHarvesterStats();
     }
   });
 }
@@ -1676,6 +1691,7 @@ async function setupHTMLHarvester() {
   document.getElementById('useUrlPatternMatching').checked = settings.useUrlPatternMatching !== false; // Default to true
   document.getElementById('compressStorage').checked = settings.compressStorage;
   document.getElementById('storageLimit').value = settings.storageLimit;
+  document.getElementById('harvestDelay').value = settings.harvestDelay || 15;
   
   // Load saved templates into dropdown
   await loadTemplatesIntoDropdown();
@@ -1691,6 +1707,7 @@ async function setupHTMLHarvester() {
   document.getElementById('useUrlPatternMatching').addEventListener('change', saveHarvesterSettings);
   document.getElementById('compressStorage').addEventListener('change', saveHarvesterSettings);
   document.getElementById('storageLimit').addEventListener('change', saveHarvesterSettings);
+  document.getElementById('harvestDelay').addEventListener('change', saveHarvesterSettings);
   document.getElementById('defaultTemplate').addEventListener('change', saveHarvesterSettings);
   
   document.getElementById('refreshHarvested').addEventListener('click', loadHarvestedPages);
@@ -1787,25 +1804,25 @@ async function calculatePagesToHarvestForTemplate(patterns) {
 }
 
 async function loadHarvestedPages() {
-  // Try to load from Chrome storage first (for pages harvested by content script)
-  const chromeStorageResult = await chrome.storage.local.get(['harvestedPages']);
-  const chromePages = chromeStorageResult.harvestedPages || [];
-  
-  // Also load from IndexedDB (for pages saved via Post Preview)
+  // Load from IndexedDB (primary storage)
   const indexedPages = await htmlStorage.getAllPages();
   
-  // Combine and deduplicate pages
-  const allPages = [...chromePages];
+  // Also check for recent pages in Chrome storage (temporary cache)
+  const chromeStorageResult = await chrome.storage.local.get(['recentHarvestedPages']);
+  const recentPages = chromeStorageResult.recentHarvestedPages || [];
   
-  // Add IndexedDB pages with proper format
-  indexedPages.forEach(page => {
+  // Use IndexedDB as primary source, add any recent pages not yet in IndexedDB
+  const allPages = [...indexedPages];
+  
+  // Add recent pages that might not be in IndexedDB yet
+  recentPages.forEach(page => {
     if (!allPages.find(p => p.url === page.url && p.timestamp === page.timestamp)) {
       allPages.push(page);
     }
   });
   
   // Sort by timestamp (newest first)
-  allPages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  allPages.sort((a, b) => new Date(b.timestamp || b.harvested_at) - new Date(a.timestamp || a.harvested_at));
   
   const tbody = document.getElementById('harvestedPagesBody');
   
@@ -1839,12 +1856,12 @@ async function loadHarvestedPages() {
           ${templateInfo}
           ${qualityBadge}
         </td>
-        <td style="padding: 10px;">${new Date(page.timestamp).toLocaleString()}</td>
+        <td style="padding: 10px;">${new Date(page.timestamp || page.harvested_at).toLocaleString()}</td>
         <td style="padding: 10px;">
-          ${(page.cleanedSize / 1024).toFixed(2)} KB
+          ${((page.cleanedSize || page.stats?.cleanedSize || 0) / 1024).toFixed(2)} KB
           ${hasQualityData ? `<br><span style="font-size: 11px; color: #666;">Quality: ${qualityScore}%</span>` : ''}
         </td>
-        <td style="padding: 10px;">${page.reduction || 'N/A'}</td>
+        <td style="padding: 10px;">${page.reduction || page.stats?.reduction || 'N/A'}</td>
         <td style="padding: 10px;">
           <button class="btn-secondary btn-view-page" data-page-id="${page.id || index}" style="padding: 5px 10px; font-size: 12px; margin-right: 5px;">View</button>
           <button class="btn-danger btn-delete-page" data-page-id="${page.id || index}" style="padding: 5px 10px; font-size: 12px;">Delete</button>
@@ -1887,6 +1904,7 @@ async function loadHarvesterSettings() {
     useUrlPatternMatching: true,
     compressStorage: true,
     storageLimit: 100,
+    harvestDelay: 15,
     defaultTemplate: ''
   };
 }
@@ -1898,6 +1916,7 @@ async function saveHarvesterSettings() {
     useUrlPatternMatching: document.getElementById('useUrlPatternMatching').checked,
     compressStorage: document.getElementById('compressStorage').checked,
     storageLimit: parseInt(document.getElementById('storageLimit').value),
+    harvestDelay: parseInt(document.getElementById('harvestDelay').value) || 15,
     defaultTemplate: document.getElementById('defaultTemplate').value
   };
   
@@ -2103,6 +2122,55 @@ function getHarvestQualityBadge(score) {
   if (score >= 50) return '<span style="color: #FFC107; margin-left: 5px;" title="Fair extraction">⚠️</span>';
   if (score > 0) return '<span style="color: #F44336; margin-left: 5px;" title="Poor extraction">❌</span>';
   return '';
+}
+
+// Handle harvested page from background script
+async function handlePageHarvested(pageData) {
+  try {
+    // Initialize storage if needed
+    await initializeHTMLStorage();
+    
+    // Prepare page data for IndexedDB storage
+    const pageToStore = {
+      url: pageData.url,
+      originalHTML: pageData.cleanedHTML, // Already cleaned by background
+      cleanedHTML: pageData.cleanedHTML,
+      title: pageData.title,
+      timestamp: pageData.timestamp,
+      originalSize: pageData.originalSize,
+      cleanedSize: pageData.cleanedSize,
+      reduction: pageData.reduction,
+      template: pageData.template,
+      matchedByPattern: pageData.matchedByPattern,
+      harvestedVia: pageData.harvestedVia || 'auto-browse',
+      extractionOptions: {
+        mode: 'auto-harvest'
+      }
+    };
+    
+    // Save to IndexedDB
+    await htmlStorage.savePage(pageToStore);
+    
+    console.log('✅ Page stored in IndexedDB:', pageData.url);
+    
+    // Refresh the harvested pages list if we're on that tab
+    const activeTab = document.querySelector('.tab-button.active');
+    if (activeTab && activeTab.textContent.includes('HTML Harvester')) {
+      loadHarvestedPages();
+      loadHarvesterStats();
+    }
+    
+    // Update the pages to harvest count
+    const pagesToHarvest = await calculatePagesToHarvest();
+    document.getElementById('pagesToHarvest').textContent = pagesToHarvest;
+    
+    // Show notification
+    showStatus(`Page harvested: ${pageData.url}`, 'success');
+    
+  } catch (error) {
+    console.error('Error storing harvested page:', error);
+    showStatus('Error storing page', 'error');
+  }
 }
 
 // Make functions available globally

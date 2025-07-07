@@ -33,6 +33,26 @@ let harvesterAutoBrowseState = {
 // Collection page management
 let collectionTags = [];
 
+// Stealth helper functions for harvester
+function getStealthDelay(baseDelay) {
+  // Add 20-40% randomization to delay
+  const variation = 0.2 + Math.random() * 0.2;
+  return Math.floor(baseDelay * (1 + variation));
+}
+
+function getRandomViewportSize() {
+  // Common viewport sizes for stealth
+  const viewports = [
+    { width: 1920, height: 1080 },
+    { width: 1366, height: 768 },
+    { width: 1440, height: 900 },
+    { width: 1536, height: 864 },
+    { width: 1600, height: 900 },
+    { width: 1280, height: 720 }
+  ];
+  return viewports[Math.floor(Math.random() * viewports.length)];
+}
+
 async function loadCollectionTags() {
   try {
     const result = await chrome.storage.local.get(['collection_tags']);
@@ -1286,7 +1306,7 @@ async function getHarvesterTargetUrls() {
   }
 }
 
-// Browse next URL for harvester
+// Browse next URL for harvester with stealth features
 async function browseNextUrlForHarvester() {
   if (!harvesterAutoBrowseState.enabled) {
     console.log('Harvester auto-browse stopped');
@@ -1316,18 +1336,35 @@ async function browseNextUrlForHarvester() {
     
     console.log(`🌐 Harvester visiting (${harvesterAutoBrowseState.currentIndex + 1}/${harvesterAutoBrowseState.queuedUrls.length}): ${url}`);
     
-    // Update progress
+    // Update progress with stealth delay info
+    const nextDelay = getStealthDelay(harvesterAutoBrowseState.interval);
     chrome.runtime.sendMessage({
       action: 'harvesterAutoBrowseUpdate',
       currentUrl: url,
       progress: `${harvesterAutoBrowseState.currentIndex + 1}/${harvesterAutoBrowseState.queuedUrls.length}`,
-      stats: harvesterAutoBrowseState.stats
+      stats: harvesterAutoBrowseState.stats,
+      nextRequestDelay: nextDelay
     }).catch(() => {});
     
-    // Open the URL in a new tab
-    const tab = await chrome.tabs.create({ url: url, active: false });
+    // Randomize viewport size for stealth
+    const viewportSize = getRandomViewportSize();
     
-    // Wait for the page to load and harvest
+    // Open the URL in a new tab with stealth settings
+    const tab = await chrome.tabs.create({ 
+      url: url, 
+      active: false,
+      width: viewportSize.width,
+      height: viewportSize.height
+    });
+    
+    // Get configurable harvest delay from settings
+    const settings = await chrome.storage.local.get(['harvesterSettings']);
+    const harvestDelay = (settings.harvesterSettings?.harvestDelay || 15) * 1000; // Convert to ms
+    const stealthDelay = getStealthDelay(harvestDelay);
+    
+    console.log(`⏱️ Waiting ${stealthDelay}ms (base: ${harvestDelay}ms) before harvesting...`);
+    
+    // Wait for the page to load and harvest with stealth delay
     setTimeout(async () => {
       try {
         // The content script will auto-harvest if enabled
@@ -1348,14 +1385,16 @@ async function browseNextUrlForHarvester() {
         // Move to next URL regardless of success/failure
         harvesterAutoBrowseState.currentIndex++;
         
-        // Schedule next browse if still enabled
+        // Schedule next browse if still enabled with stealth delay
         if (harvesterAutoBrowseState.enabled && harvesterAutoBrowseState.currentIndex < harvesterAutoBrowseState.queuedUrls.length) {
+          const nextBrowseDelay = getStealthDelay(harvesterAutoBrowseState.interval);
+          console.log(`⏱️ Next browse in ${nextBrowseDelay}ms`);
           setTimeout(() => {
             browseNextUrlForHarvester();
-          }, harvesterAutoBrowseState.interval);
+          }, nextBrowseDelay);
         }
       }
-    }, 15000); // Give 15 seconds for page to load and harvest
+    }, stealthDelay);
     
   } catch (error) {
     console.error('Error in harvester auto-browse:', error);
@@ -1389,10 +1428,15 @@ async function startHarvesterAutoBrowse() {
       };
     }
     
+    // Get harvest delay from settings or use default
+    const settings = await chrome.storage.local.get(['harvesterSettings']);
+    const harvestDelay = (settings.harvesterSettings?.harvestDelay || 15) * 1000;
+    
     // Initialize state
     harvesterAutoBrowseState.enabled = true;
     harvesterAutoBrowseState.currentIndex = 0;
     harvesterAutoBrowseState.queuedUrls = matchingUrls;
+    harvesterAutoBrowseState.interval = harvestDelay;
     harvesterAutoBrowseState.stats.totalQueued = matchingUrls.length;
     harvesterAutoBrowseState.stats.totalHarvested = 0;
     harvesterAutoBrowseState.stats.successfulHarvests = 0;
@@ -1475,7 +1519,8 @@ async function handlePageHarvest(pageData) {
       autoHarvest: true, 
       applyTemplates: true,
       useUrlPatternMatching: true,
-      compressStorage: true
+      compressStorage: true,
+      harvestDelay: 15 // Default 15 seconds
     };
     
     if (!settings.autoHarvest) {
@@ -1535,25 +1580,32 @@ async function handlePageHarvest(pageData) {
       reduction: reduction + '%',
       cleanedHTML: cleanedHTML,
       template: selectedTemplate ? selectedTemplate.name : null,
-      matchedByPattern: selectedTemplate && settings.useUrlPatternMatching
+      matchedByPattern: selectedTemplate && settings.useUrlPatternMatching,
+      harvestedVia: 'auto-browse'
     };
     
-    // Get existing harvested pages
-    const harvestedResult = await chrome.storage.local.get(['harvestedPages']);
-    let harvestedPages = harvestedResult.harvestedPages || [];
+    // Send to dashboard for storage in IndexedDB
+    // The dashboard will handle the actual storage using html-storage.js
+    chrome.runtime.sendMessage({
+      action: 'pageHarvested',
+      data: harvestData
+    }).catch(() => {});
     
-    // Add new page (limit to 100 pages to avoid storage issues)
-    harvestedPages.unshift(harvestData);
-    if (harvestedPages.length > 100) {
-      harvestedPages = harvestedPages.slice(0, 100);
+    // Also keep a temporary copy in Chrome storage for quick access (last 10 only)
+    const harvestedResult = await chrome.storage.local.get(['recentHarvestedPages']);
+    let recentPages = harvestedResult.recentHarvestedPages || [];
+    recentPages.unshift(harvestData);
+    if (recentPages.length > 10) {
+      recentPages = recentPages.slice(0, 10);
     }
-    
-    // Save back to storage
-    await chrome.storage.local.set({ harvestedPages: harvestedPages });
+    await chrome.storage.local.set({ recentHarvestedPages: recentPages });
     
     console.log('✅ Page harvested:', pageData.url, 'Reduction:', reduction + '%');
     
-    return { success: true, reduction: reduction + '%', totalPages: harvestedPages.length };
+    // Update harvested count
+    harvesterAutoBrowseState.stats.successfulHarvests++;
+    
+    return { success: true, reduction: reduction + '%' };
   } catch (error) {
     console.error('Error harvesting page:', error);
     return { success: false, error: error.message };
