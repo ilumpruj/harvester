@@ -16,7 +16,7 @@ let nextRequestTime = null;
 let stealthSettings = null;
 
 // Initialize dashboard
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   initializeChart();
   loadData();
   setupEventListeners();
@@ -24,6 +24,8 @@ document.addEventListener('DOMContentLoaded', () => {
   setupAutoBrowse();
   setupCollections();
   setupIntelligence();
+  await setupPostPreview();
+  await setupHTMLHarvester();
   startAutoRefresh();
   listenForUpdates();
 });
@@ -214,26 +216,65 @@ function renderCompaniesTable(companies) {
   const companiesForPage = filteredCompanies.slice(startIndex, endIndex);
   
   // Render table
-  tbody.innerHTML = companiesForPage.map(company => `
-    <tr>
-      <td class="company-name">${company.name || 'Unknown'}</td>
-      <td>
-        <a href="${company.url}" target="_blank" class="company-url">
-          ${company.url.length > 50 ? company.url.substr(0, 50) + '...' : company.url}
-        </a>
-      </td>
-      <td class="timestamp">${new Date(company.extracted_at).toLocaleString()}</td>
-      <td>
-        <button class="btn-secondary btn-copy-url" style="padding: 5px 10px; font-size: 12px;" 
-                data-url="${company.url}">
-          Copy
-        </button>
-      </td>
-    </tr>
-  `).join('');
+  tbody.innerHTML = companiesForPage.map(company => {
+    // Calculate quality indicators
+    const hasConfidence = company.confidence !== undefined;
+    const confidencePercent = hasConfidence ? Math.round(company.confidence * 100) : 0;
+    const confidenceColor = getConfidenceColor(company.confidence);
+    
+    // Check for additional details
+    const hasDetails = company.details && (
+      company.details.description || 
+      company.details.location || 
+      (company.details.services && company.details.services.length > 0)
+    );
+    
+    // Quality badge
+    const qualityBadge = getQualityBadge(company);
+    
+    return `
+      <tr>
+        <td class="company-name">
+          ${company.name || 'Unknown'}
+          ${qualityBadge}
+          ${hasDetails ? '<span style="color: #4CAF50; margin-left: 5px;" title="Has additional details">📋</span>' : ''}
+        </td>
+        <td>
+          <a href="${company.url}" target="_blank" class="company-url">
+            ${company.url.length > 50 ? company.url.substr(0, 50) + '...' : company.url}
+          </a>
+        </td>
+        <td class="timestamp">
+          ${new Date(company.extracted_at).toLocaleString()}
+          ${hasConfidence ? `
+            <div style="margin-top: 5px;">
+              <span style="font-size: 11px; color: #666;">Confidence:</span>
+              <span style="font-size: 11px; color: ${confidenceColor}; font-weight: bold;">
+                ${confidencePercent}%
+              </span>
+            </div>
+          ` : ''}
+        </td>
+        <td>
+          <button class="btn-secondary btn-copy-url" style="padding: 5px 10px; font-size: 12px;" 
+                  data-url="${company.url}">
+            Copy
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
   
   // Update pagination controls
   updatePaginationControls(totalPages);
+  
+  // Add event listeners for copy buttons
+  document.querySelectorAll('.btn-copy-url').forEach(button => {
+    button.addEventListener('click', (e) => {
+      const url = e.target.getAttribute('data-url');
+      copyUrl(url);
+    });
+  });
 }
 
 // Setup event listeners
@@ -431,6 +472,10 @@ function setupTabs() {
         updateCollectionStats();
       } else if (targetTab === 'intelligence') {
         loadIntelligenceData();
+      } else if (targetTab === 'post-preview') {
+        // Post preview tab is ready
+      } else if (targetTab === 'html-harvester') {
+        loadHarvesterStats();
       }
     });
   });
@@ -1017,7 +1062,7 @@ function updatePaginationControls(totalPages) {
   
   // Previous button
   paginationHTML += `
-    <button class="btn-secondary" onclick="changePage(${currentPage - 1})" 
+    <button class="btn-secondary btn-page-prev" data-page="${currentPage - 1}" 
             ${currentPage === 1 ? 'disabled' : ''} 
             style="padding: 5px 10px; font-size: 12px;">
       ← Previous
@@ -1038,7 +1083,7 @@ function updatePaginationControls(totalPages) {
   
   // Items per page selector
   paginationHTML += `
-    <select id="itemsPerPageSelect" onchange="changeItemsPerPage(this.value)" 
+    <select id="itemsPerPageSelect" 
             style="padding: 5px; font-size: 12px; border: 1px solid #ddd; border-radius: 4px;">
       <option value="10" ${itemsPerPage === 10 ? 'selected' : ''}>10 per page</option>
       <option value="20" ${itemsPerPage === 20 ? 'selected' : ''}>20 per page</option>
@@ -1049,7 +1094,7 @@ function updatePaginationControls(totalPages) {
   
   // Next button
   paginationHTML += `
-    <button class="btn-secondary" onclick="changePage(${currentPage + 1})" 
+    <button class="btn-secondary btn-page-next" data-page="${currentPage + 1}" 
             ${currentPage === totalPages ? 'disabled' : ''}
             style="padding: 5px 10px; font-size: 12px;">
       Next →
@@ -1057,6 +1102,28 @@ function updatePaginationControls(totalPages) {
   `;
   
   paginationContainer.innerHTML = paginationHTML;
+  
+  // Add event listeners
+  const prevBtn = paginationContainer.querySelector('.btn-page-prev');
+  if (prevBtn && !prevBtn.disabled) {
+    prevBtn.addEventListener('click', (e) => {
+      changePage(parseInt(e.target.getAttribute('data-page')));
+    });
+  }
+  
+  const nextBtn = paginationContainer.querySelector('.btn-page-next');
+  if (nextBtn && !nextBtn.disabled) {
+    nextBtn.addEventListener('click', (e) => {
+      changePage(parseInt(e.target.getAttribute('data-page')));
+    });
+  }
+  
+  const itemsSelect = paginationContainer.querySelector('#itemsPerPageSelect');
+  if (itemsSelect) {
+    itemsSelect.addEventListener('change', (e) => {
+      changeItemsPerPage(e.target.value);
+    });
+  }
 }
 
 function hidePaginationControls() {
@@ -1172,7 +1239,1387 @@ function updateUserAgent() {
   });
 }
 
+// Post Preview functionality
+let currentPreviewData = null;
+let htmlStripper = null;
+let htmlStorage = null;
+
+async function setupPostPreview() {
+  // Initialize HTML stripper and storage
+  htmlStripper = new HTMLStripper();
+  await initializeHTMLStorage();
+  
+  // Fetch preview button
+  document.getElementById('fetchPreview').addEventListener('click', async () => {
+    const url = document.getElementById('previewUrl').value.trim();
+    if (!url) {
+      showStatus('Please enter a URL', 'error');
+      return;
+    }
+    
+    console.log('Fetching URL:', url);
+    showStatus('Fetching page...', 'success');
+    
+    // Validate URL
+    try {
+      new URL(url);
+    } catch (e) {
+      showStatus('Invalid URL format', 'error');
+      return;
+    }
+    
+    // Create a tab to fetch the content
+    chrome.tabs.create({ url: url, active: false }, async (tab) => {
+      console.log('Tab created:', tab);
+      // Wait for the tab to complete loading
+      const checkTabReady = async (tabId) => {
+        return new Promise((resolve) => {
+          const listener = (updatedTabId, changeInfo, tab) => {
+            console.log('Tab update:', updatedTabId, changeInfo);
+            if (updatedTabId === tabId && changeInfo.status === 'complete') {
+              chrome.tabs.onUpdated.removeListener(listener);
+              resolve(tab);
+            }
+          };
+          chrome.tabs.onUpdated.addListener(listener);
+          
+          // Add timeout to prevent hanging
+          setTimeout(() => {
+            chrome.tabs.onUpdated.removeListener(listener);
+            resolve(null);
+          }, 10000); // 10 second timeout
+        });
+      };
+      
+      try {
+        const readyTab = await checkTabReady(tab.id);
+        
+        if (!readyTab) {
+          showStatus('Timeout waiting for page to load', 'error');
+          chrome.tabs.remove(tab.id);
+          return;
+        }
+        
+        console.log('Tab ready, injecting script...');
+        
+        // Inject script using the new API
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            return {
+              html: document.documentElement.outerHTML,
+              url: window.location.href,
+              title: document.title
+            };
+          }
+        });
+        
+        if (results && results[0] && results[0].result) {
+          currentPreviewData = results[0].result;
+          
+          // Generate URL pattern
+          const pattern = generateUrlPattern(currentPreviewData.url);
+          currentPreviewData.urlPattern = pattern;
+          
+          // Show URL pattern section
+          document.getElementById('urlPatternSection').style.display = 'block';
+          document.getElementById('urlPattern').value = pattern;
+          
+          displayPreview();
+          chrome.tabs.remove(tab.id);
+          showStatus('Page fetched successfully!', 'success');
+        } else {
+          showStatus('Failed to fetch page content', 'error');
+          chrome.tabs.remove(tab.id);
+        }
+      } catch (error) {
+        console.error('Error fetching page:', error);
+        showStatus('Error: ' + error.message, 'error');
+        if (tab && tab.id) {
+          try {
+            chrome.tabs.remove(tab.id);
+          } catch (e) {
+            console.error('Error removing tab:', e);
+          }
+        }
+      }
+    });
+  });
+  
+  // Apply stripping button
+  document.getElementById('applyStripping').addEventListener('click', () => {
+    if (!currentPreviewData) {
+      showStatus('No page loaded', 'error');
+      return;
+    }
+    
+    applyStrippingOptions();
+    displayPreview();
+  });
+  
+  // Save template button
+  document.getElementById('saveTemplate').addEventListener('click', async () => {
+    const name = prompt('Enter template name:');
+    if (!name) return;
+    
+    try {
+      // Initialize htmlStorage if needed
+      await initializeHTMLStorage();
+      
+      // Check if template with this name already exists
+      const existingTemplates = await htmlStorage.getTemplates();
+      if (existingTemplates.some(t => t.name === name)) {
+        if (!confirm(`A template named "${name}" already exists. Replace it?`)) {
+          return;
+        }
+        // Delete the existing template first
+        await htmlStorage.deleteTemplate(name);
+      }
+      
+      const template = htmlStripper.createTemplate(name, 'Custom template');
+      
+      // Add URL patterns to template if available
+      if (currentPreviewData && currentPreviewData.urlPattern) {
+        const urlPattern = document.getElementById('urlPattern').value || currentPreviewData.urlPattern;
+        template.urlPatterns = [urlPattern];
+      }
+      
+      await htmlStorage.saveTemplate(template);
+      
+      // Also save templates with patterns to Chrome storage for background script access
+      await syncTemplatesToChromeStorage();
+      
+      showStatus('Template saved!', 'success');
+      
+      // Refresh template lists
+      await loadTemplatesList();
+      await loadTemplatesIntoDropdown();
+    } catch (error) {
+      console.error('Error saving template:', error);
+      showStatus('Error saving template', 'error');
+    }
+  });
+  
+  // View mode buttons
+  document.getElementById('viewOriginal').addEventListener('click', () => setPreviewMode('original'));
+  document.getElementById('viewCleaned').addEventListener('click', () => setPreviewMode('cleaned'));
+  document.getElementById('viewSideBySide').addEventListener('click', () => setPreviewMode('sidebyside'));
+  document.getElementById('viewExtracted').addEventListener('click', () => setPreviewMode('extracted'));
+  
+  // Export buttons
+  document.getElementById('copyCleanedHtml').addEventListener('click', copyCleanedHTML);
+  document.getElementById('downloadCleanedHtml').addEventListener('click', downloadCleanedHTML);
+  document.getElementById('shareWithClaude').addEventListener('click', prepareForClaude);
+  document.getElementById('exportExtractionConfig').addEventListener('click', exportExtractionConfig);
+  
+  // Update stripper options when checkboxes change
+  const checkboxes = document.querySelectorAll('#post-preview-tab input[type="checkbox"]');
+  checkboxes.forEach(checkbox => {
+    checkbox.addEventListener('change', updateStripperOptions);
+  });
+  
+  // Template management
+  document.getElementById('refreshTemplates').addEventListener('click', loadTemplatesList);
+  document.getElementById('manageTemplates').addEventListener('click', openTemplateManager);
+  
+  // Load templates on init
+  loadTemplatesList();
+  
+  // Sync templates to Chrome storage on init
+  syncTemplatesToChromeStorage();
+}
+
+function updateStripperOptions() {
+  const options = {};
+  const checkboxes = document.querySelectorAll('#post-preview-tab input[type="checkbox"]');
+  checkboxes.forEach(checkbox => {
+    options[checkbox.id] = checkbox.checked;
+  });
+  htmlStripper.options = options;
+}
+
+function applyStrippingOptions() {
+  updateStripperOptions();
+  const result = htmlStripper.stripHTML(currentPreviewData.html);
+  currentPreviewData.cleaned = result.html;
+  currentPreviewData.stats = result.stats;
+  currentPreviewData.extractedData = htmlStripper.extractStructuredData(
+    new DOMParser().parseFromString(result.html, 'text/html')
+  );
+  
+  // Update stats display
+  document.getElementById('originalSize').textContent = result.stats.originalSizeKB;
+  document.getElementById('cleanedSize').textContent = result.stats.cleanedSizeKB;
+  document.getElementById('sizeReduction').textContent = result.stats.reduction;
+}
+
+function displayPreview() {
+  const container = document.getElementById('previewContainer');
+  const mode = container.dataset.mode || 'original';
+  
+  if (!currentPreviewData) {
+    container.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">No content loaded</div>';
+    return;
+  }
+  
+  if (!currentPreviewData.cleaned) {
+    applyStrippingOptions();
+  }
+  
+  switch (mode) {
+    case 'original':
+      container.innerHTML = `<iframe srcdoc="${escapeHtml(currentPreviewData.html)}" style="width: 100%; height: 100%; border: none;"></iframe>`;
+      break;
+    case 'cleaned':
+      container.innerHTML = `<iframe srcdoc="${escapeHtml(currentPreviewData.cleaned)}" style="width: 100%; height: 100%; border: none;"></iframe>`;
+      break;
+    case 'sidebyside':
+      container.innerHTML = `
+        <div style="display: flex; height: 100%;">
+          <div style="flex: 1; border-right: 1px solid #ddd;">
+            <div style="padding: 10px; background: #f0f0f0; font-weight: bold;">Original</div>
+            <iframe srcdoc="${escapeHtml(currentPreviewData.html)}" style="width: 100%; height: calc(100% - 40px); border: none;"></iframe>
+          </div>
+          <div style="flex: 1;">
+            <div style="padding: 10px; background: #f0f0f0; font-weight: bold;">Cleaned</div>
+            <iframe srcdoc="${escapeHtml(currentPreviewData.cleaned)}" style="width: 100%; height: calc(100% - 40px); border: none;"></iframe>
+          </div>
+        </div>
+      `;
+      break;
+    case 'extracted':
+      // Format the extracted data nicely
+      const extractedData = currentPreviewData.extractedData;
+      let formattedHTML = '<div style="padding: 20px; overflow: auto;">';
+      
+      // Company Info Section
+      if (extractedData.companyInfo) {
+        const info = extractedData.companyInfo;
+        formattedHTML += '<h3>Company Information</h3>';
+        formattedHTML += '<div style="margin-left: 20px; margin-bottom: 20px;">';
+        
+        if (info.name) formattedHTML += `<p><strong>Name:</strong> ${info.name}</p>`;
+        if (info.location) formattedHTML += `<p><strong>Location:</strong> ${info.location}</p>`;
+        if (info.description) formattedHTML += `<p><strong>Description:</strong> ${info.description}</p>`;
+        
+        if (info.team && info.team.size) {
+          formattedHTML += `<p><strong>Team Size:</strong> ${info.team.size} people</p>`;
+        }
+        
+        if (info.languages && info.languages.length > 0) {
+          formattedHTML += `<p><strong>Languages:</strong> ${info.languages.join(', ')}</p>`;
+        }
+        
+        if (info.portfolio && info.portfolio.count) {
+          formattedHTML += `<p><strong>Portfolio:</strong> ${info.portfolio.count} projects</p>`;
+        }
+        
+        if (info.reviews) {
+          if (info.reviews.rating) formattedHTML += `<p><strong>Rating:</strong> ${info.reviews.rating}/5`;
+          if (info.reviews.count) formattedHTML += ` (${info.reviews.count} reviews)`;
+          formattedHTML += '</p>';
+        }
+        
+        if (info.founded) formattedHTML += `<p><strong>Founded:</strong> ${info.founded}</p>`;
+        if (info.memberSince) formattedHTML += `<p><strong>Member Since:</strong> ${info.memberSince}</p>`;
+        if (info.remoteWork) formattedHTML += `<p><strong>Remote Work:</strong> Yes</p>`;
+        
+        if (info.specialties && info.specialties.length > 0) {
+          formattedHTML += `<p><strong>Specialties:</strong> ${info.specialties.join(', ')}</p>`;
+        }
+        
+        formattedHTML += '</div>';
+      }
+      
+      // Raw JSON Section (collapsed by default)
+      formattedHTML += '<details style="margin-top: 20px;">';
+      formattedHTML += '<summary style="cursor: pointer; font-weight: bold;">Raw Extracted Data (JSON)</summary>';
+      formattedHTML += `<pre style="margin-top: 10px; background: #f5f5f5; padding: 10px; border-radius: 5px; overflow: auto;">${JSON.stringify(extractedData, null, 2)}</pre>`;
+      formattedHTML += '</details>';
+      
+      formattedHTML += '</div>';
+      container.innerHTML = formattedHTML;
+      break;
+  }
+}
+
+function setPreviewMode(mode) {
+  const container = document.getElementById('previewContainer');
+  container.dataset.mode = mode;
+  
+  // Update button states
+  const buttons = ['viewOriginal', 'viewCleaned', 'viewSideBySide', 'viewExtracted'];
+  buttons.forEach(id => {
+    document.getElementById(id).classList.remove('active');
+  });
+  
+  const modeMap = {
+    'original': 'viewOriginal',
+    'cleaned': 'viewCleaned',
+    'sidebyside': 'viewSideBySide',
+    'extracted': 'viewExtracted'
+  };
+  
+  document.getElementById(modeMap[mode]).classList.add('active');
+  displayPreview();
+}
+
+function copyCleanedHTML() {
+  if (!currentPreviewData || !currentPreviewData.cleaned) {
+    showStatus('No cleaned HTML available', 'error');
+    return;
+  }
+  
+  navigator.clipboard.writeText(currentPreviewData.cleaned).then(() => {
+    showStatus('Cleaned HTML copied to clipboard!', 'success');
+  });
+}
+
+function downloadCleanedHTML() {
+  if (!currentPreviewData || !currentPreviewData.cleaned) {
+    showStatus('No cleaned HTML available', 'error');
+    return;
+  }
+  
+  const blob = new Blob([currentPreviewData.cleaned], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const filename = `cleaned_${new URL(currentPreviewData.url).hostname}_${Date.now()}.html`;
+  
+  chrome.downloads.download({
+    url: url,
+    filename: filename
+  });
+  
+  showStatus('Download started!', 'success');
+}
+
+function prepareForClaude() {
+  if (!currentPreviewData || !currentPreviewData.cleaned) {
+    showStatus('No cleaned HTML available', 'error');
+    return;
+  }
+  
+  const claudeData = {
+    url: currentPreviewData.url,
+    title: currentPreviewData.title,
+    cleanedHTML: currentPreviewData.cleaned,
+    extractedData: currentPreviewData.extractedData,
+    stats: currentPreviewData.stats
+  };
+  
+  const blob = new Blob([JSON.stringify(claudeData, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const filename = `claude_ready_${Date.now()}.json`;
+  
+  chrome.downloads.download({
+    url: url,
+    filename: filename
+  });
+  
+  showStatus('Claude-ready file downloaded!', 'success');
+}
+
+// HTML Harvester functionality
+async function setupHTMLHarvester() {
+  await initializeHTMLStorage();
+  
+  // Load settings
+  const settings = await loadHarvesterSettings();
+  document.getElementById('autoHarvest').checked = settings.autoHarvest;
+  document.getElementById('applyTemplates').checked = settings.applyTemplates;
+  document.getElementById('useUrlPatternMatching').checked = settings.useUrlPatternMatching !== false; // Default to true
+  document.getElementById('compressStorage').checked = settings.compressStorage;
+  document.getElementById('storageLimit').value = settings.storageLimit;
+  
+  // Load saved templates into dropdown
+  await loadTemplatesIntoDropdown();
+  
+  // Set the selected template if one was saved
+  if (settings.defaultTemplate) {
+    document.getElementById('defaultTemplate').value = settings.defaultTemplate;
+  }
+  
+  // Event listeners
+  document.getElementById('autoHarvest').addEventListener('change', saveHarvesterSettings);
+  document.getElementById('applyTemplates').addEventListener('change', saveHarvesterSettings);
+  document.getElementById('useUrlPatternMatching').addEventListener('change', saveHarvesterSettings);
+  document.getElementById('compressStorage').addEventListener('change', saveHarvesterSettings);
+  document.getElementById('storageLimit').addEventListener('change', saveHarvesterSettings);
+  document.getElementById('defaultTemplate').addEventListener('change', saveHarvesterSettings);
+  
+  document.getElementById('refreshHarvested').addEventListener('click', loadHarvestedPages);
+  document.getElementById('searchHarvested').addEventListener('input', searchHarvestedPages);
+  
+  document.getElementById('exportAllHarvested').addEventListener('click', exportAllAsZip);
+  document.getElementById('reprocessAll').addEventListener('click', reprocessAllPages);
+  document.getElementById('exportForClaude').addEventListener('click', exportAllForClaude);
+  document.getElementById('clearHarvestedStorage').addEventListener('click', clearAllStorage);
+  
+  // Load initial data
+  loadHarvesterStats();
+  loadHarvestedPages();
+}
+
+async function initializeHTMLStorage() {
+  if (!htmlStorage) {
+    htmlStorage = new HTMLStorage();
+    await htmlStorage.init();
+  }
+}
+
+async function loadHarvesterStats() {
+  const stats = await htmlStorage.getStats();
+  document.getElementById('pagesHarvested').textContent = stats.pageCount;
+  document.getElementById('totalStorage').textContent = stats.totalSizeMB + ' MB';
+  document.getElementById('avgReduction').textContent = stats.avgReduction;
+  
+  // Load template count
+  const templates = await htmlStorage.getTemplates();
+  document.getElementById('templatesSaved').textContent = templates.length;
+}
+
+async function loadHarvestedPages() {
+  // Try to load from Chrome storage first (for pages harvested by content script)
+  const chromeStorageResult = await chrome.storage.local.get(['harvestedPages']);
+  const chromePages = chromeStorageResult.harvestedPages || [];
+  
+  // Also load from IndexedDB (for pages saved via Post Preview)
+  const indexedPages = await htmlStorage.getAllPages();
+  
+  // Combine and deduplicate pages
+  const allPages = [...chromePages];
+  
+  // Add IndexedDB pages with proper format
+  indexedPages.forEach(page => {
+    if (!allPages.find(p => p.url === page.url && p.timestamp === page.timestamp)) {
+      allPages.push(page);
+    }
+  });
+  
+  // Sort by timestamp (newest first)
+  allPages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  
+  const tbody = document.getElementById('harvestedPagesBody');
+  
+  if (allPages.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="5" style="text-align: center; padding: 40px; color: #999;">
+          No pages harvested yet. Visit pages with auto-harvest enabled to start collecting.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  tbody.innerHTML = allPages.map((page, index) => {
+    // Check for extraction quality data
+    const hasQualityData = page.validation || page.extractionQuality;
+    const qualityScore = page.validation?.score || page.extractionQuality?.score || 0;
+    const qualityBadge = getHarvestQualityBadge(qualityScore);
+    
+    // Template info
+    const templateInfo = page.template ? 
+      `<span style="font-size: 11px; color: #666; display: block;">Template: ${page.template}${page.matchedByPattern ? ' (pattern match)' : ''}</span>` : '';
+    
+    return `
+      <tr>
+        <td style="padding: 10px;">
+          <a href="${page.url}" target="_blank" style="color: #2196F3; text-decoration: none;">
+            ${page.url.substring(0, 50)}${page.url.length > 50 ? '...' : ''}
+          </a>
+          ${templateInfo}
+          ${qualityBadge}
+        </td>
+        <td style="padding: 10px;">${new Date(page.timestamp).toLocaleString()}</td>
+        <td style="padding: 10px;">
+          ${(page.cleanedSize / 1024).toFixed(2)} KB
+          ${hasQualityData ? `<br><span style="font-size: 11px; color: #666;">Quality: ${qualityScore}%</span>` : ''}
+        </td>
+        <td style="padding: 10px;">${page.reduction || 'N/A'}</td>
+        <td style="padding: 10px;">
+          <button class="btn-secondary btn-view-page" data-page-id="${page.id || index}" style="padding: 5px 10px; font-size: 12px; margin-right: 5px;">View</button>
+          <button class="btn-danger btn-delete-page" data-page-id="${page.id || index}" style="padding: 5px 10px; font-size: 12px;">Delete</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+  
+  // Update stats to reflect all pages
+  document.getElementById('pagesHarvested').textContent = allPages.length;
+  
+  // Add event listeners to dynamically created buttons
+  document.querySelectorAll('.btn-view-page').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const pageId = e.target.getAttribute('data-page-id');
+      await viewHarvestedPage(pageId);
+    });
+  });
+  
+  document.querySelectorAll('.btn-delete-page').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const pageId = e.target.getAttribute('data-page-id');
+      await deleteHarvestedPage(pageId);
+    });
+  });
+}
+
+async function searchHarvestedPages(event) {
+  const query = event.target.value;
+  const pages = await htmlStorage.searchPages(query);
+  // Update display with filtered pages
+  // (Reuse the display logic from loadHarvestedPages)
+}
+
+async function loadHarvesterSettings() {
+  const result = await chrome.storage.local.get(['harvesterSettings']);
+  return result.harvesterSettings || {
+    autoHarvest: true,
+    applyTemplates: true,
+    compressStorage: true,
+    storageLimit: 100,
+    defaultTemplate: ''
+  };
+}
+
+async function saveHarvesterSettings() {
+  const settings = {
+    autoHarvest: document.getElementById('autoHarvest').checked,
+    applyTemplates: document.getElementById('applyTemplates').checked,
+    useUrlPatternMatching: document.getElementById('useUrlPatternMatching').checked,
+    compressStorage: document.getElementById('compressStorage').checked,
+    storageLimit: parseInt(document.getElementById('storageLimit').value),
+    defaultTemplate: document.getElementById('defaultTemplate').value
+  };
+  
+  await chrome.storage.local.set({ harvesterSettings: settings });
+}
+
+async function loadTemplatesIntoDropdown() {
+  const dropdown = document.getElementById('defaultTemplate');
+  if (!dropdown) return;
+  
+  // Clear existing options except the first one (None)
+  while (dropdown.options.length > 1) {
+    dropdown.remove(1);
+  }
+  
+  try {
+    // Initialize htmlStorage if needed
+    await initializeHTMLStorage();
+    
+    // Get templates from IndexedDB
+    const templates = await htmlStorage.getTemplates();
+    
+    // Add saved templates to dropdown
+    templates.forEach(template => {
+      const option = document.createElement('option');
+      option.value = template.name;
+      let text = `${template.name} (${template.description || 'Custom template'})`;
+      
+      // Add URL pattern info if available
+      if (template.urlPatterns && template.urlPatterns.length > 0) {
+        text += ` - Pattern: ${template.urlPatterns[0]}`;
+      }
+      
+      option.textContent = text;
+      dropdown.appendChild(option);
+    });
+    
+    // If no custom templates, add the default ones back
+    if (templates.length === 0) {
+      const defaults = [
+        { value: 'article', text: 'Article' },
+        { value: 'company', text: 'Company Profile' },
+        { value: 'listing', text: 'Listing Page' }
+      ];
+      
+      defaults.forEach(def => {
+        const option = document.createElement('option');
+        option.value = def.value;
+        option.textContent = def.text;
+        dropdown.appendChild(option);
+      });
+    }
+  } catch (error) {
+    console.error('Error loading templates:', error);
+    showStatus('Error loading templates', 'error');
+  }
+}
+
+async function exportAllAsZip() {
+  showStatus('Preparing ZIP export...', 'success');
+  // Implementation for ZIP export
+  // Would need a ZIP library like JSZip
+}
+
+async function reprocessAllPages() {
+  if (!confirm('Reprocess all pages with current settings?')) return;
+  showStatus('Reprocessing pages...', 'success');
+  // Implementation for reprocessing
+}
+
+async function exportAllForClaude() {
+  // Get pages from IndexedDB
+  const indexedPages = await htmlStorage.exportForClaude();
+  
+  // Get pages from Chrome storage
+  const chromeStorageResult = await chrome.storage.local.get(['harvestedPages']);
+  const chromePages = chromeStorageResult.harvestedPages || [];
+  
+  // Format Chrome storage pages for Claude
+  const formattedChromePages = chromePages.map(page => ({
+    url: page.url,
+    timestamp: page.timestamp,
+    html: page.cleanedHTML,
+    extractedData: null
+  }));
+  
+  // Combine all pages
+  const allPages = [...indexedPages, ...formattedChromePages];
+  
+  const blob = new Blob([JSON.stringify(allPages, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  
+  chrome.downloads.download({
+    url: url,
+    filename: `claude_export_${Date.now()}.json`
+  });
+  
+  showStatus(`Export for Claude completed! ${allPages.length} pages exported.`, 'success');
+}
+
+async function clearAllStorage() {
+  if (!confirm('Clear all harvested pages? This cannot be undone.')) return;
+  
+  // Clear IndexedDB
+  await htmlStorage.clearStorage();
+  
+  // Clear Chrome storage
+  await chrome.storage.local.remove(['harvestedPages']);
+  
+  loadHarvesterStats();
+  loadHarvestedPages();
+  showStatus('Storage cleared!', 'success');
+}
+
+// Helper functions
+function escapeHtml(unsafe) {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// Get confidence color based on score
+function getConfidenceColor(confidence) {
+  if (!confidence) return '#999';
+  if (confidence >= 0.8) return '#4CAF50'; // Green
+  if (confidence >= 0.6) return '#FFC107'; // Amber
+  if (confidence >= 0.4) return '#FF9800'; // Orange
+  return '#F44336'; // Red
+}
+
+// Get quality badge for company
+function getQualityBadge(company) {
+  // Check if we have validation data (from enhanced extraction)
+  if (company.validation && company.validation.score !== undefined) {
+    const score = company.validation.score;
+    if (score >= 90) return '<span style="color: #4CAF50; margin-left: 5px;" title="Excellent extraction">⭐</span>';
+    if (score >= 70) return '<span style="color: #8BC34A; margin-left: 5px;" title="Good extraction">✅</span>';
+    if (score >= 50) return '<span style="color: #FFC107; margin-left: 5px;" title="Fair extraction">⚠️</span>';
+    return '<span style="color: #F44336; margin-left: 5px;" title="Poor extraction">❌</span>';
+  }
+  
+  // Fallback to confidence-based badge
+  if (company.confidence) {
+    if (company.confidence >= 0.8) return '<span style="color: #4CAF50; margin-left: 5px;" title="High confidence">✓</span>';
+    if (company.confidence >= 0.5) return '<span style="color: #FFC107; margin-left: 5px;" title="Medium confidence">~</span>';
+  }
+  
+  return '';
+}
+
+// Get quality badge for harvested pages
+function getHarvestQualityBadge(score) {
+  if (score >= 90) return '<span style="color: #4CAF50; margin-left: 5px;" title="Excellent extraction">⭐</span>';
+  if (score >= 70) return '<span style="color: #8BC34A; margin-left: 5px;" title="Good extraction">✅</span>';
+  if (score >= 50) return '<span style="color: #FFC107; margin-left: 5px;" title="Fair extraction">⚠️</span>';
+  if (score > 0) return '<span style="color: #F44336; margin-left: 5px;" title="Poor extraction">❌</span>';
+  return '';
+}
+
 // Make functions available globally
 window.copyUrl = copyUrl;
 window.changePage = changePage;
 window.changeItemsPerPage = changeItemsPerPage;
+async function viewHarvestedPage(id) {
+  // Try to get from IndexedDB first
+  let page = await htmlStorage.getPage(id);
+  
+  // If not found, try Chrome storage by index
+  if (!page && !isNaN(id)) {
+    const chromeStorageResult = await chrome.storage.local.get(['harvestedPages']);
+    const chromePages = chromeStorageResult.harvestedPages || [];
+    page = chromePages[id];
+  }
+  
+  if (page) {
+    // Open in new tab or modal
+    const html = page.cleanedHTML || page.html;
+    window.open(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  } else {
+    showStatus('Page not found', 'error');
+  }
+}
+
+async function deleteHarvestedPage(id) {
+  if (confirm('Delete this page?')) {
+    // Try to delete from IndexedDB
+    try {
+      await htmlStorage.deletePage(id);
+    } catch (e) {
+      // If not in IndexedDB, try Chrome storage
+      if (!isNaN(id)) {
+        const chromeStorageResult = await chrome.storage.local.get(['harvestedPages']);
+        let chromePages = chromeStorageResult.harvestedPages || [];
+        chromePages.splice(id, 1);
+        await chrome.storage.local.set({ harvestedPages: chromePages });
+      }
+    }
+    
+    loadHarvestedPages();
+    loadHarvesterStats();
+    showStatus('Page deleted!', 'success');
+  }
+}
+
+// Generate URL pattern from a URL
+function generateUrlPattern(url) {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+    const segments = pathname.split('/').filter(s => s.length > 0);
+    
+    let pattern = `${urlObj.protocol}//${urlObj.hostname}`;
+    
+    // Analyze each path segment
+    segments.forEach((segment, index) => {
+      // Check if segment is a number
+      if (/^\d+$/.test(segment)) {
+        pattern += '/{id}';
+      }
+      // Check if segment looks like a slug (contains hyphens)
+      else if (segment.includes('-') && segment.length > 10) {
+        pattern += '/{slug}';
+      }
+      // Check if it's a category-like segment (short, no special chars)
+      else if (segment.length < 20 && /^[a-z]+$/i.test(segment)) {
+        pattern += '/' + segment;
+      }
+      // Default to wildcard for complex segments
+      else {
+        pattern += '/{*}';
+      }
+    });
+    
+    // Simplify the domain if it has www
+    if (urlObj.hostname.startsWith('www.')) {
+      const domain = urlObj.hostname.substring(4);
+      pattern = pattern.replace(urlObj.hostname, 'www.{domain}');
+    }
+    
+    return pattern;
+  } catch (error) {
+    console.error('Error generating URL pattern:', error);
+    return '';
+  }
+}
+
+// Match a URL against a pattern
+function matchUrlPattern(url, pattern) {
+  try {
+    // Convert pattern to regex
+    let regexPattern = pattern
+      .replace(/\./g, '\\.')
+      .replace(/\//g, '\\/')
+      .replace(/\{domain\}/g, '[^/]+')
+      .replace(/\{slug\}/g, '[^/]+')
+      .replace(/\{id\}/g, '\\d+')
+      .replace(/\{\*\}/g, '[^/]+');
+    
+    const regex = new RegExp(`^${regexPattern}$`);
+    return regex.test(url);
+  } catch (error) {
+    console.error('Error matching URL pattern:', error);
+    return false;
+  }
+}
+
+// Sync templates to Chrome storage for background script access
+async function syncTemplatesToChromeStorage() {
+  try {
+    await initializeHTMLStorage();
+    const templates = await htmlStorage.getTemplates();
+    
+    // Create a simplified version for Chrome storage
+    const templatePatterns = templates.map(t => ({
+      name: t.name,
+      urlPatterns: t.urlPatterns || [],
+      options: t.options
+    }));
+    
+    await chrome.storage.local.set({ templatePatterns });
+    console.log('Synced templates to Chrome storage:', templatePatterns);
+  } catch (error) {
+    console.error('Error syncing templates:', error);
+  }
+}
+
+// Find matching template for a URL
+async function findMatchingTemplate(url) {
+  try {
+    const result = await chrome.storage.local.get(['templatePatterns']);
+    const templates = result.templatePatterns || [];
+    
+    for (const template of templates) {
+      if (template.urlPatterns && template.urlPatterns.length > 0) {
+        for (const pattern of template.urlPatterns) {
+          if (matchUrlPattern(url, pattern)) {
+            return template.name;
+          }
+        }
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error finding matching template:', error);
+    return null;
+  }
+}
+
+// Export extraction configuration
+function exportExtractionConfig() {
+  const extractionConfig = {
+    name: "Sortlist Company Extraction Rules",
+    version: "1.0",
+    created: new Date().toISOString(),
+    description: "Configuration for extracting company information from Sortlist pages",
+    
+    selectors: {
+      companyName: {
+        selector: "h1",
+        description: "Main heading containing company name",
+        fallback: ".company-name, .agency-name"
+      },
+      
+      location: {
+        selectors: [
+          "h1 + span.p",
+          "[class*='location']",
+          "[class*='address']"
+        ],
+        description: "Location usually appears right after company name",
+        pattern: "Must contain comma (e.g., 'Brussels, Belgium')"
+      },
+      
+      description: {
+        selectors: [
+          ".text-break-word > span[data-testid='clamp-lines']",
+          "[class*='description']",
+          ".company-description"
+        ],
+        description: "Company description or about text",
+        minLength: 100
+      },
+      
+      infoRows: {
+        selector: ".layout-row.layout-align-start-center",
+        description: "Icon-based information rows containing various company details",
+        extraction: "Text content analysis with pattern matching"
+      },
+      
+      rating: {
+        selector: "[data-testid*='star-rating']",
+        description: "Star rating container",
+        extraction: "Parse rating value and review count from text"
+      },
+      
+      category: {
+        selector: ".bold.h4",
+        description: "Main service category or specialty"
+      },
+      
+      services: {
+        selector: "h2:contains('service'), h3:contains('service'), h4:contains('service')",
+        description: "Services section header",
+        extraction: "Extract count from text (e.g., '6 services')"
+      },
+      
+      buttons: {
+        selector: "button[data-testid]",
+        description: "Action buttons with test IDs",
+        attributes: ["data-testid", "textContent"]
+      }
+    },
+    
+    patterns: {
+      teamSize: {
+        regex: "(\\\\d+)(?:-\\\\d+)?\\\\s*people",
+        description: "Extracts team size from text like '11-50 people in their team'",
+        extraction: "First number in the match"
+      },
+      
+      languages: {
+        regex: "Speaks\\\\s+(.+)",
+        description: "Extracts languages from 'Speaks English, French, Dutch'",
+        extraction: "Split by comma"
+      },
+      
+      portfolio: {
+        regex: "(\\\\d+)\\\\+?\\\\s*projects",
+        description: "Extracts project count from '25+ projects in portfolio'",
+        extraction: "Number of projects"
+      },
+      
+      founded: {
+        regex: "Founded in\\\\s+(\\\\d{4})",
+        description: "Extracts founding year",
+        extraction: "4-digit year"
+      },
+      
+      memberSince: {
+        regex: "member since\\\\s+(\\\\d{4})",
+        description: "Extracts Sortlist membership year",
+        extraction: "4-digit year"
+      },
+      
+      awards: {
+        regex: "(\\\\d+)\\\\s*award",
+        description: "Extracts award count",
+        extraction: "Number of awards"
+      },
+      
+      rating: {
+        regex: "(\\\\d+(?:\\\\.\\\\d+)?)\\\\s*/\\\\s*5",
+        description: "Extracts rating value",
+        extraction: "Decimal rating out of 5"
+      },
+      
+      reviews: {
+        regex: "\\\\((\\\\d+)\\\\s*reviews?\\\\)",
+        description: "Extracts review count",
+        extraction: "Number of reviews"
+      }
+    },
+    
+    textIndicators: {
+      remoteWork: {
+        text: "Works remotely",
+        description: "Indicates if company works remotely"
+      },
+      
+      services: {
+        text: "services",
+        description: "Used to identify service count sections"
+      }
+    },
+    
+    extractionFlow: [
+      "1. Extract company name from h1",
+      "2. Look for location in adjacent span or location classes",
+      "3. Find description in text-break-word or description classes",
+      "4. Iterate through .layout-row elements and match patterns",
+      "5. Extract rating and reviews from star rating container",
+      "6. Identify main category from bold h4 elements",
+      "7. Extract service count from section headers",
+      "8. Collect button actions and metadata"
+    ],
+    
+    notes: {
+      flexibility: "Selectors are tried in order until a match is found",
+      validation: "Description must be >100 chars, location must contain comma",
+      patterns: "All regex patterns are case-insensitive by default",
+      gentle_mode: "Use gentle stripping mode to preserve more structure",
+      future: "These rules can be used by AI to create automated extractors"
+    }
+  };
+  
+  // Create a formatted display
+  const configDisplay = `
+    <div style="padding: 20px; font-family: monospace; font-size: 12px;">
+      <h3>Extraction Configuration Export</h3>
+      <p>This configuration shows how company data is extracted from Sortlist pages.</p>
+      
+      <details open>
+        <summary style="font-weight: bold; cursor: pointer; margin: 10px 0;">Selectors</summary>
+        <pre>${JSON.stringify(extractionConfig.selectors, null, 2)}</pre>
+      </details>
+      
+      <details>
+        <summary style="font-weight: bold; cursor: pointer; margin: 10px 0;">Pattern Matching Rules</summary>
+        <pre>${JSON.stringify(extractionConfig.patterns, null, 2)}</pre>
+      </details>
+      
+      <details>
+        <summary style="font-weight: bold; cursor: pointer; margin: 10px 0;">Text Indicators</summary>
+        <pre>${JSON.stringify(extractionConfig.textIndicators, null, 2)}</pre>
+      </details>
+      
+      <details>
+        <summary style="font-weight: bold; cursor: pointer; margin: 10px 0;">Extraction Flow</summary>
+        <pre>${extractionConfig.extractionFlow.join('\n')}</pre>
+      </details>
+      
+      <div style="margin-top: 20px;">
+        <button onclick="navigator.clipboard.writeText(JSON.stringify(${JSON.stringify(extractionConfig)}, null, 2)).then(() => alert('Configuration copied to clipboard!'))">
+          Copy Configuration
+        </button>
+        <button onclick="
+          const blob = new Blob([JSON.stringify(${JSON.stringify(extractionConfig)}, null, 2)], {type: 'application/json'});
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'extraction-config.json';
+          a.click();
+        ">
+          Download as JSON
+        </button>
+      </div>
+    </div>
+  `;
+  
+  // Open in new window
+  const configWindow = window.open('', 'ExtractionConfig', 'width=800,height=600');
+  configWindow.document.write(`
+    <html>
+      <head>
+        <title>Extraction Configuration</title>
+        <style>
+          body { margin: 0; background: #f5f5f5; }
+          pre { background: #fff; padding: 15px; border-radius: 5px; overflow: auto; }
+          details { margin: 10px 0; }
+          button { 
+            background: #4CAF50; 
+            color: white; 
+            border: none; 
+            padding: 10px 20px; 
+            border-radius: 5px; 
+            cursor: pointer; 
+            margin: 5px;
+          }
+          button:hover { background: #45a049; }
+        </style>
+      </head>
+      <body>${configDisplay}</body>
+    </html>
+  `);
+  
+  showStatus('Extraction configuration opened in new window', 'success');
+}
+
+// Template management functions
+async function loadTemplatesList() {
+  const container = document.getElementById('templatesList');
+  if (!container) return;
+  
+  try {
+    // Initialize htmlStorage if needed
+    await initializeHTMLStorage();
+    
+    const templates = await htmlStorage.getTemplates();
+    
+    if (templates.length === 0) {
+      container.innerHTML = '<div style="color: #666; padding: 10px;">No templates saved yet. Save a template from the stripping options above.</div>';
+      return;
+    }
+    
+    let html = '<div style="padding: 10px;">';
+    html += '<table style="width: 100%; border-collapse: collapse;">';
+    html += '<thead><tr style="border-bottom: 2px solid #ddd;">';
+    html += '<th style="text-align: left; padding: 8px;">Name</th>';
+    html += '<th style="text-align: left; padding: 8px;">URL Patterns</th>';
+    html += '<th style="text-align: left; padding: 8px;">Created</th>';
+    html += '<th style="text-align: right; padding: 8px;">Actions</th>';
+    html += '</tr></thead><tbody>';
+    
+    templates.forEach(template => {
+      const created = new Date(template.created).toLocaleDateString();
+      const patterns = template.urlPatterns || [];
+      const patternsDisplay = patterns.length > 0 
+        ? patterns.map(p => `<code style="background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 11px;">${p}</code>`).join('<br>')
+        : '<span style="color: #999; font-size: 12px;">No patterns</span>';
+      
+      html += `<tr style="border-bottom: 1px solid #eee;">`;
+      html += `<td style="padding: 8px; font-weight: bold;">${template.name}</td>`;
+      html += `<td style="padding: 8px;">${patternsDisplay}</td>`;
+      html += `<td style="padding: 8px; color: #666; font-size: 12px;">${created}</td>`;
+      html += `<td style="padding: 8px; text-align: right;">`;
+      html += `<button class="apply-template" data-name="${template.name}" style="padding: 4px 8px; margin: 0 2px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer;">Apply</button>`;
+      html += `<button class="delete-template" data-name="${template.name}" style="padding: 4px 8px; margin: 0 2px; background: #f44336; color: white; border: none; border-radius: 3px; cursor: pointer;">Delete</button>`;
+      html += `</td></tr>`;
+    });
+    
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+    
+    // Add event listeners
+    container.querySelectorAll('.apply-template').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const templateName = e.target.dataset.name;
+        await applyTemplate(templateName);
+      });
+    });
+    
+    container.querySelectorAll('.delete-template').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const templateName = e.target.dataset.name;
+        if (confirm(`Delete template "${templateName}"?`)) {
+          await deleteTemplate(templateName);
+        }
+      });
+    });
+    
+  } catch (error) {
+    console.error('Error loading templates:', error);
+    container.innerHTML = '<div style="color: #f44336; padding: 10px;">Error loading templates</div>';
+  }
+}
+
+async function applyTemplate(templateName) {
+  try {
+    await initializeHTMLStorage();
+    const templates = await htmlStorage.getTemplates();
+    const template = templates.find(t => t.name === templateName);
+    
+    if (!template) {
+      showStatus('Template not found', 'error');
+      return;
+    }
+    
+    // Apply the template options to the checkboxes
+    Object.entries(template.options).forEach(([key, value]) => {
+      const checkbox = document.getElementById(key);
+      if (checkbox && checkbox.type === 'checkbox') {
+        checkbox.checked = value;
+      }
+    });
+    
+    // Update the stripper options
+    updateStripperOptions();
+    
+    showStatus(`Applied template: ${templateName}`, 'success');
+  } catch (error) {
+    console.error('Error applying template:', error);
+    showStatus('Error applying template', 'error');
+  }
+}
+
+async function deleteTemplate(templateName) {
+  try {
+    await initializeHTMLStorage();
+    await htmlStorage.deleteTemplate(templateName);
+    await loadTemplatesList();
+    await loadTemplatesIntoDropdown(); // Refresh harvester dropdown too
+    await syncTemplatesToChromeStorage(); // Sync after deletion
+    showStatus(`Deleted template: ${templateName}`, 'success');
+  } catch (error) {
+    console.error('Error deleting template:', error);
+    showStatus('Error deleting template', 'error');
+  }
+}
+
+function openTemplateManager() {
+  // Open a new window with template management interface
+  const managerWindow = window.open('', 'TemplateManager', 'width=800,height=600');
+  managerWindow.document.write(`
+    <html>
+      <head>
+        <title>Template Manager</title>
+        <style>
+          body { 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            background: #f5f5f5; 
+          }
+          h1 { color: #333; }
+          .info { 
+            background: #e3f2fd; 
+            padding: 15px; 
+            border-radius: 5px; 
+            margin: 20px 0;
+          }
+          .template-info {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+          }
+          pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+          }
+        </style>
+      </head>
+      <body>
+        <h1>Template Manager</h1>
+        <div class="info">
+          <h3>About Templates</h3>
+          <p>Templates save your HTML stripping settings so you can quickly apply them to different pages.</p>
+          <p>Templates created in the Post Preview tab are automatically available in the HTML Harvester for auto-harvesting.</p>
+        </div>
+        
+        <div class="template-info">
+          <h3>How to Use Templates</h3>
+          <ol>
+            <li><strong>Create a Template:</strong> Configure stripping options in Post Preview, then click "Save as Template"</li>
+            <li><strong>Apply a Template:</strong> Click "Apply" next to any saved template to use its settings</li>
+            <li><strong>Auto-Harvesting:</strong> Select a default template in HTML Harvester settings</li>
+            <li><strong>Delete Templates:</strong> Click "Delete" to remove unwanted templates</li>
+          </ol>
+        </div>
+        
+        <div class="template-info">
+          <h3>Template Storage</h3>
+          <p>Templates are stored in IndexedDB and include:</p>
+          <ul>
+            <li>All stripping options (scripts, styles, navigation, etc.)</li>
+            <li>Content preservation settings</li>
+            <li>Custom name and description</li>
+            <li>Creation timestamp</li>
+          </ul>
+        </div>
+        
+        <div class="template-info">
+          <h3>Best Practices</h3>
+          <ul>
+            <li>Create different templates for different types of pages (articles, profiles, listings)</li>
+            <li>Test templates on sample pages before using for auto-harvesting</li>
+            <li>Use descriptive names to identify templates easily</li>
+            <li>Export important templates as JSON for backup</li>
+          </ul>
+        </div>
+      </body>
+    </html>
+  `);
+}
+
+// URL Pattern Generation and Matching Functions
+function generateUrlPattern(url) {
+  try {
+    const urlObj = new URL(url);
+    const domain = urlObj.hostname.replace('www.', '');
+    const pathParts = urlObj.pathname.split('/').filter(part => part);
+    
+    // Start with the protocol and domain placeholder
+    let pattern = `https://{domain}`;
+    
+    // Analyze path segments
+    pathParts.forEach((part, index) => {
+      // Check if it's a numeric ID
+      if (/^\d+$/.test(part)) {
+        pattern += '/{id}';
+      }
+      // Check if it's a slug (contains letters and possibly hyphens/underscores)
+      else if (/^[a-z0-9-_]+$/i.test(part)) {
+        // First segment might be a category
+        if (index === 0) {
+          pattern += `/${part}`; // Keep literal for first segment (e.g., 'agency', 'company')
+        } else {
+          pattern += '/{slug}';
+        }
+      }
+      // Otherwise use wildcard
+      else {
+        pattern += '/{*}';
+      }
+    });
+    
+    return pattern;
+  } catch (error) {
+    console.error('Error generating URL pattern:', error);
+    return '';
+  }
+}
+
+// Match a URL against a pattern
+function matchUrlPattern(url, pattern) {
+  try {
+    const urlObj = new URL(url);
+    const urlDomain = urlObj.hostname.replace('www.', '');
+    const urlPath = urlObj.pathname;
+    
+    // Replace pattern variables with regex
+    let regexPattern = pattern
+      .replace('{domain}', '([^/]+)')
+      .replace(/{id}/g, '(\\d+)')
+      .replace(/{slug}/g, '([a-z0-9-_]+)')
+      .replace(/{\\*}/g, '([^/]+)');
+    
+    // Build full regex
+    const fullPattern = `^https?://(?:www\\.)?${regexPattern}/?$`;
+    const regex = new RegExp(fullPattern, 'i');
+    
+    // Test the full URL
+    return regex.test(url);
+  } catch (error) {
+    console.error('Error matching URL pattern:', error);
+    return false;
+  }
+}
+
+// Find matching template for a URL
+async function findMatchingTemplate(url) {
+  try {
+    await initializeHTMLStorage();
+    const templates = await htmlStorage.getTemplates();
+    
+    // Find templates with URL patterns
+    for (const template of templates) {
+      if (template.urlPatterns && template.urlPatterns.length > 0) {
+        for (const pattern of template.urlPatterns) {
+          if (matchUrlPattern(url, pattern)) {
+            return template;
+          }
+        }
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error finding matching template:', error);
+    return null;
+  }
+}
+
+// Make updateStripperOptions available globally
+window.updateStripperOptions = updateStripperOptions;
+
+// Sync templates to Chrome storage for background script access
+async function syncTemplatesToChromeStorage() {
+  try {
+    await initializeHTMLStorage();
+    const templates = await htmlStorage.getTemplates();
+    
+    // Extract only the necessary data for pattern matching
+    const templatePatterns = templates
+      .filter(t => t.urlPatterns && t.urlPatterns.length > 0)
+      .map(t => ({
+        name: t.name,
+        urlPatterns: t.urlPatterns,
+        options: t.options // Include options for applying the template
+      }));
+    
+    await chrome.storage.local.set({ templatePatterns: templatePatterns });
+    console.log('✅ Synced template patterns to Chrome storage:', templatePatterns.length);
+  } catch (error) {
+    console.error('Error syncing templates:', error);
+  }
+}

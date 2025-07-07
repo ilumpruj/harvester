@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>HTML Harvester Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .test-section {
+      margin: 20px 0;
+      padding: 20px;
+      background: #f5f5f5;
+      border-radius: 5px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      border: none;
+      background: #4CAF50;
+      color: white;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    #output {
+      margin-top: 20px;
+      padding: 10px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      min-height: 100px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧪 HTML Harvester Test Suite</h1>
+  
+  <div class="test-section">
+    <h2>1. HTML Stripper Test</h2>
+    <button onclick="testStripper()">Test HTML Stripping</button>
+    <button onclick="testOptions()">Test Stripping Options</button>
+  </div>
+  
+  <div class="test-section">
+    <h2>2. Storage Test</h2>
+    <button onclick="testStorage()">Test IndexedDB Storage</button>
+    <button onclick="testCompression()">Test Compression</button>
+  </div>
+  
+  <div class="test-section">
+    <h2>3. Integration Test</h2>
+    <button onclick="testFullWorkflow()">Test Full Workflow</button>
+    <button onclick="testExport()">Test Export for Claude</button>
+  </div>
+  
+  <div class="test-section">
+    <h2>4. Auto-Harvest Test</h2>
+    <p>Visit a Sortlist page to test auto-harvest functionality</p>
+    <button onclick="checkHarvestedPages()">Check Harvested Pages</button>
+  </div>
+  
+  <div id="output"></div>
+  
+  <script src="html-stripper.js"></script>
+  <script src="html-storage.js"></script>
+  <script>
+    const output = document.getElementById('output');
+    
+    function log(message) {
+      output.textContent += message + '\n\n';
+      console.log(message);
+    }
+    
+    function clearLog() {
+      output.textContent = '';
+    }
+    
+    // Test HTML Stripper
+    async function testStripper() {
+      clearLog();
+      log('Testing HTML Stripper...');
+      
+      const testHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Test Page</title>
+          <script>console.log('should be removed');</script>
+          <style>body { color: red; }</style>
+        </head>
+        <body>
+          <h1>Company Name</h1>
+          <p>This is important content.</p>
+          <!-- This comment should be removed -->
+          <script>alert('another script');</script>
+          <div data-tracking="analytics">
+            <span>More content</span>
+          </div>
+        </body>
+        </html>
+      `;
+      
+      const stripper = new HTMLStripper();
+      const result = stripper.stripHTML(testHTML);
+      
+      log('Original size: ' + testHTML.length + ' bytes');
+      log('Cleaned size: ' + result.cleanedHTML.length + ' bytes');
+      log('Reduction: ' + result.reduction + '%');
+      log('Scripts removed: ' + (result.cleanedHTML.includes('<script') ? 'FAIL' : 'PASS'));
+      log('Styles removed: ' + (result.cleanedHTML.includes('<style') ? 'FAIL' : 'PASS'));
+      log('Comments removed: ' + (!result.cleanedHTML.includes('<!--') ? 'PASS' : 'FAIL'));
+    }
+    
+    // Test stripping options
+    async function testOptions() {
+      clearLog();
+      log('Testing stripping options...');
+      
+      const testHTML = '<div class="test" id="main" data-test="value">Content</div>';
+      
+      const stripper1 = new HTMLStripper({ stripAttributes: false });
+      const result1 = stripper1.stripHTML(testHTML);
+      log('With attributes: ' + result1.cleanedHTML.trim());
+      
+      const stripper2 = new HTMLStripper({ stripClasses: true, stripDataAttributes: true });
+      const result2 = stripper2.stripHTML(testHTML);
+      log('Without classes/data: ' + result2.cleanedHTML.trim());
+    }
+    
+    // Test storage
+    async function testStorage() {
+      clearLog();
+      log('Testing IndexedDB storage...');
+      
+      const storage = new HTMLStorage();
+      await storage.init();
+      log('✓ Storage initialized');
+      
+      // Save a test page
+      const pageData = {
+        url: 'https://example.com/test',
+        originalHTML: '<html><body>Test content</body></html>',
+        cleanedHTML: '<body>Test content</body>',
+        originalSize: 100,
+        cleanedSize: 50,
+        reduction: '50%'
+      };
+      
+      const pageId = await storage.savePage(pageData);
+      log('✓ Page saved with ID: ' + pageId);
+      
+      // Retrieve the page
+      const retrieved = await storage.getPage(pageId);
+      log('✓ Page retrieved: ' + (retrieved.url === pageData.url ? 'PASS' : 'FAIL'));
+      
+      // Get stats
+      const stats = await storage.getStats();
+      log('✓ Storage stats: ' + JSON.stringify(stats, null, 2));
+    }
+    
+    // Test compression
+    async function testCompression() {
+      clearLog();
+      log('Testing compression...');
+      
+      const storage = new HTMLStorage();
+      const testText = 'This is a test string that should be compressed. '.repeat(100);
+      
+      const compressed = await storage.compress(testText);
+      const decompressed = await storage.decompress(compressed);
+      
+      log('Original size: ' + testText.length + ' bytes');
+      log('Compressed size: ' + compressed.length + ' bytes');
+      log('Compression ratio: ' + ((1 - compressed.length / testText.length) * 100).toFixed(2) + '%');
+      log('Decompression: ' + (decompressed === testText ? 'PASS' : 'FAIL'));
+    }
+    
+    // Test full workflow
+    async function testFullWorkflow() {
+      clearLog();
+      log('Testing full workflow...');
+      
+      // 1. Strip HTML
+      const testHTML = `
+        <html>
+        <head>
+          <title>Acme Company</title>
+          <script>tracking code</script>
+        </head>
+        <body>
+          <h1>Acme Company</h1>
+          <p>We provide excellent services.</p>
+          <div class="contact">
+            <p>Email: contact@acme.com</p>
+            <p>Phone: 555-1234</p>
+          </div>
+        </body>
+        </html>
+      `;
+      
+      const stripper = new HTMLStripper();
+      const strippedResult = stripper.stripHTML(testHTML);
+      log('✓ HTML stripped: ' + strippedResult.reduction + '% reduction');
+      
+      // 2. Extract data
+      const extractedData = stripper.extractStructuredData(strippedResult.cleanedHTML);
+      log('✓ Data extracted: ' + JSON.stringify(extractedData, null, 2));
+      
+      // 3. Save to storage
+      const storage = new HTMLStorage();
+      await storage.init();
+      
+      const pageId = await storage.savePage({
+        url: 'https://example.com/acme',
+        originalHTML: testHTML,
+        cleanedHTML: strippedResult.cleanedHTML,
+        originalSize: testHTML.length,
+        cleanedSize: strippedResult.cleanedHTML.length,
+        reduction: strippedResult.reduction,
+        extractedData: extractedData
+      });
+      
+      log('✓ Saved to storage with ID: ' + pageId);
+    }
+    
+    // Test export for Claude
+    async function testExport() {
+      clearLog();
+      log('Testing export for Claude...');
+      
+      const storage = new HTMLStorage();
+      await storage.init();
+      
+      const exported = await storage.exportForClaude();
+      log('✓ Exported ' + exported.length + ' pages for Claude');
+      
+      if (exported.length > 0) {
+        log('Sample export:');
+        log(JSON.stringify(exported[0], null, 2));
+      }
+    }
+    
+    // Check harvested pages
+    async function checkHarvestedPages() {
+      clearLog();
+      log('Checking harvested pages...');
+      
+      chrome.storage.local.get(['harvesterSettings'], (result) => {
+        log('Auto-harvest enabled: ' + (result.harvesterSettings?.autoHarvest ? 'YES' : 'NO'));
+      });
+      
+      const storage = new HTMLStorage();
+      await storage.init();
+      
+      const pages = await storage.getAllPages();
+      log('Total harvested pages: ' + pages.length);
+      
+      if (pages.length > 0) {
+        log('\nRecent pages:');
+        pages.slice(-5).forEach(page => {
+          log(`- ${page.url} (${new Date(page.timestamp).toLocaleString()})`);
+        });
+      }
+    }
+  </script>
+</body>
+</html>

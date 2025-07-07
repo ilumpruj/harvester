@@ -8,14 +8,18 @@
     "storage",
     "tabs",
     "downloads",
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "scripting"
   ],
   "host_permissions": [
     "*://*.sortlist.com/*",
     "*://*.sortlist.be/*",
     "*://*.sortlist.fr/*",
     "*://*.sortlist.co.uk/*",
-    "*://*.sortlist.us/*"
+    "*://*.sortlist.us/*",
+    "http://localhost:*/*",
+    "ws://localhost:*/*",
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"

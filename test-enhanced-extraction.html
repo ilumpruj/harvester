@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test Enhanced Extraction</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .test-section {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+    .test-button {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    .test-button:hover {
+      background: #45a049;
+    }
+    .results {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 5px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .status {
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 5px;
+    }
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+    }
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+    }
+  </style>
+</head>
+<body>
+  <h1>Test Enhanced Extraction</h1>
+  
+  <div class="test-section">
+    <h2>Quick Test</h2>
+    <p>Click the button below to test the enhanced extraction on a sample HTML that mimics a Sortlist company page:</p>
+    <button class="test-button" onclick="testEnhancedExtraction()">Test Enhanced Extraction</button>
+    <div id="quickResults" class="results" style="display:none;"></div>
+  </div>
+  
+  <div class="test-section">
+    <h2>Manual Test Instructions</h2>
+    <ol>
+      <li>Open the dashboard (chrome-extension://[extension-id]/dashboard.html)</li>
+      <li>Go to the "Post Preview" tab</li>
+      <li>Enter a Sortlist company page URL (e.g., https://www.sortlist.com/agency/example)</li>
+      <li>Click "Fetch & Preview"</li>
+      <li>Switch to "Extracted Data" view</li>
+      <li>Verify that the Company Information section shows:
+        <ul>
+          <li>Company name and location</li>
+          <li>Description</li>
+          <li>Team size</li>
+          <li>Languages</li>
+          <li>Portfolio count</li>
+          <li>Reviews and ratings</li>
+          <li>Founded date</li>
+          <li>Member since</li>
+          <li>Specialties</li>
+        </ul>
+      </li>
+    </ol>
+  </div>
+  
+  <div class="test-section">
+    <h2>Check Current Configuration</h2>
+    <button class="test-button" onclick="checkConfiguration()">Check Configuration</button>
+    <div id="configResults" class="results" style="display:none;"></div>
+  </div>
+
+  <script src="html-stripper.js"></script>
+  <script>
+    // Sample HTML that mimics a Sortlist company page structure
+    const sampleHTML = `
+      <!DOCTYPE html>
+      <html>
+      <body>
+        <h1>Digital Innovation Agency</h1>
+        <span class="p">Brussels, Belgium</span>
+        
+        <div class="text-break-word">
+          <span data-testid="clamp-lines">
+            We are a full-service digital agency specializing in web development, 
+            mobile apps, and digital marketing. With over 10 years of experience, 
+            we help businesses transform their digital presence.
+          </span>
+        </div>
+        
+        <div class="layout-row layout-align-start-center">
+          <span>11-50 people in their team</span>
+        </div>
+        
+        <div class="layout-row layout-align-start-center">
+          <span>Speaks English, French, Dutch</span>
+        </div>
+        
+        <div class="layout-row layout-align-start-center">
+          <span>25+ projects in portfolio</span>
+        </div>
+        
+        <div class="layout-row layout-align-start-center">
+          <span>Founded in 2014</span>
+        </div>
+        
+        <div class="layout-row layout-align-start-center">
+          <span>Sortlist member since 2018</span>
+        </div>
+        
+        <div class="layout-row layout-align-start-center">
+          <span>Works remotely</span>
+        </div>
+        
+        <div class="layout-row layout-align-start-center">
+          <span>3 awards</span>
+        </div>
+        
+        <div data-testid="star-rating-container">
+          <span>4.8 / 5 (42 reviews)</span>
+        </div>
+        
+        <div class="bold h4">Web Development</div>
+        
+        <h3>Our Services (6 services)</h3>
+        
+        <button data-testid="contact-agency">Contact Agency</button>
+        <button data-testid="view-portfolio">View Portfolio</button>
+      </body>
+      </html>
+    `;
+    
+    function testEnhancedExtraction() {
+      const resultsDiv = document.getElementById('quickResults');
+      resultsDiv.style.display = 'block';
+      resultsDiv.innerHTML = 'Testing enhanced extraction...\n\n';
+      
+      try {
+        // Test standard extraction
+        const standardStripper = new HTMLStripper();
+        const standardResult = standardStripper.stripHTML(sampleHTML);
+        const standardData = standardStripper.extractStructuredData(new DOMParser().parseFromString(sampleHTML, 'text/html'));
+        
+        // Test gentle extraction
+        const gentleStripper = HTMLStripper.createGentleStripper();
+        const gentleResult = gentleStripper.stripHTML(sampleHTML);
+        const gentleData = gentleStripper.extractStructuredData(new DOMParser().parseFromString(sampleHTML, 'text/html'));
+        
+        resultsDiv.innerHTML += '=== STANDARD EXTRACTION ===\n';
+        resultsDiv.innerHTML += `Reduction: ${standardResult.stats.reduction}\n`;
+        resultsDiv.innerHTML += `Company Info Found:\n`;
+        resultsDiv.innerHTML += JSON.stringify(standardData.companyInfo, null, 2) + '\n\n';
+        
+        resultsDiv.innerHTML += '=== GENTLE EXTRACTION ===\n';
+        resultsDiv.innerHTML += `Reduction: ${gentleResult.stats.reduction}\n`;
+        resultsDiv.innerHTML += `Company Info Found:\n`;
+        resultsDiv.innerHTML += JSON.stringify(gentleData.companyInfo, null, 2) + '\n\n';
+        
+        // Check if key data was extracted
+        const info = standardData.companyInfo;
+        const checks = {
+          'Company Name': info.name === 'Digital Innovation Agency',
+          'Location': info.location === 'Brussels, Belgium',
+          'Description': info.description && info.description.includes('digital agency'),
+          'Team Size': info.team.size === 11,
+          'Languages': info.languages.length === 3,
+          'Portfolio': info.portfolio.count === 25,
+          'Founded': info.founded === '2014',
+          'Member Since': info.memberSince === '2018',
+          'Remote Work': info.remoteWork === true,
+          'Awards': info.awards.count === 3,
+          'Rating': info.reviews.rating === 4.8,
+          'Review Count': info.reviews.count === 42,
+          'Specialty': info.specialties.includes('Web Development')
+        };
+        
+        resultsDiv.innerHTML += '=== EXTRACTION CHECKS ===\n';
+        let passCount = 0;
+        for (const [check, passed] of Object.entries(checks)) {
+          resultsDiv.innerHTML += `${passed ? '✅' : '❌'} ${check}\n`;
+          if (passed) passCount++;
+        }
+        
+        resultsDiv.innerHTML += `\nPassed: ${passCount}/${Object.keys(checks).length} checks\n`;
+        
+        if (passCount === Object.keys(checks).length) {
+          resultsDiv.innerHTML += '\n🎉 All extraction tests passed! The enhanced extraction is working correctly.';
+        } else {
+          resultsDiv.innerHTML += '\n⚠️ Some extraction tests failed. Please check the implementation.';
+        }
+        
+      } catch (error) {
+        resultsDiv.innerHTML += `\nError: ${error.message}\n${error.stack}`;
+      }
+    }
+    
+    function checkConfiguration() {
+      const resultsDiv = document.getElementById('configResults');
+      resultsDiv.style.display = 'block';
+      resultsDiv.innerHTML = 'Checking configuration...\n\n';
+      
+      // Check if enhanced extraction is available
+      if (typeof HTMLStripper !== 'undefined') {
+        resultsDiv.innerHTML += '✅ HTMLStripper is loaded\n';
+        
+        // Check gentle mode
+        try {
+          const gentleStripper = HTMLStripper.createGentleStripper();
+          resultsDiv.innerHTML += '✅ Gentle mode is available\n';
+          resultsDiv.innerHTML += `Gentle mode options:\n${JSON.stringify(gentleStripper.options, null, 2)}\n`;
+        } catch (e) {
+          resultsDiv.innerHTML += '❌ Gentle mode error: ' + e.message + '\n';
+        }
+      } else {
+        resultsDiv.innerHTML += '❌ HTMLStripper is not loaded\n';
+      }
+      
+      // Check for extraction validator
+      if (typeof ExtractionValidator !== 'undefined') {
+        resultsDiv.innerHTML += '\n✅ ExtractionValidator is loaded\n';
+      } else {
+        resultsDiv.innerHTML += '\n⚠️ ExtractionValidator is not loaded (only available in content script)\n';
+      }
+      
+      resultsDiv.innerHTML += '\n📝 To enable enhanced extraction in the extension:\n';
+      resultsDiv.innerHTML += '1. Run: ./enable-enhanced-extraction.sh\n';
+      resultsDiv.innerHTML += '2. Or manually: cp content-enhanced.js content.js\n';
+      resultsDiv.innerHTML += '3. Reload the extension in Chrome\n';
+    }
+  </script>
+</body>
+</html>

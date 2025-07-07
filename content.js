@@ -107,6 +107,35 @@ function capturePageContent() {
   };
 }
 
+// Auto-harvest functionality
+async function autoHarvestPage() {
+  // Check if auto-harvest is enabled
+  chrome.storage.local.get(['harvesterSettings'], async (result) => {
+    const settings = result.harvesterSettings || { autoHarvest: true };
+    
+    if (settings.autoHarvest) {
+      console.log('🌐 Auto-harvesting page...');
+      
+      // Send page content to background for processing
+      chrome.runtime.sendMessage({
+        action: 'harvestPage',
+        data: {
+          url: window.location.href,
+          title: document.title,
+          html: document.documentElement.outerHTML,
+          timestamp: new Date().toISOString()
+        }
+      }, response => {
+        if (chrome.runtime.lastError) {
+          console.error('❌ Error harvesting page:', chrome.runtime.lastError);
+        } else {
+          console.log('✅ Page harvested successfully');
+        }
+      });
+    }
+  });
+}
+
 // Wait for page to fully load before extracting
 function performExtraction() {
   try {
@@ -155,12 +184,14 @@ console.log('👁️ Tab visibility:', {
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
   console.log('📄 Page already loaded, extracting immediately');
   extractedData = performExtraction();
+  autoHarvestPage(); // Auto-harvest after extraction
 } else {
   // Wait for page to load
   console.log('⏳ Waiting for page to load...');
   window.addEventListener('load', () => {
     console.log('📄 Page loaded, starting extraction');
     extractedData = performExtraction();
+    autoHarvestPage(); // Auto-harvest after extraction
   });
 }
 

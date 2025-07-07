@@ -1,5 +1,6 @@
 // Popup script
 let autoBrowseInterval = null;
+let claudeBridgeConnected = false;
 
 document.addEventListener('DOMContentLoaded', () => {
   // Get current data
@@ -12,6 +13,9 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Set up auto-browse controls
   setupAutoBrowse();
+  
+  // Set up Claude Bridge controls
+  setupClaudeBridge();
   
   // Copy URLs button
   document.getElementById('copyUrls').addEventListener('click', () => {
@@ -197,5 +201,103 @@ function showStatus(message, type) {
 window.addEventListener('unload', () => {
   if (autoBrowseInterval) {
     clearInterval(autoBrowseInterval);
+  }
+});
+
+// ============= Claude Bridge Functions =============
+
+function setupClaudeBridge() {
+  // Check initial connection status
+  updateClaudeStatus();
+  
+  // Connect button
+  document.getElementById('connectClaude').addEventListener('click', () => {
+    if (!claudeBridgeConnected) {
+      chrome.runtime.sendMessage({ action: 'connectToClaude' }, (response) => {
+        if (response.success) {
+          showStatus('Connecting to Claude Bridge...', 'success');
+          // Status will be updated via message listener
+        }
+      });
+    } else {
+      // Disconnect
+      chrome.runtime.sendMessage({ action: 'disconnectFromClaude' }, (response) => {
+        if (response.success) {
+          showStatus('Disconnected from Claude Bridge', 'success');
+          updateClaudeStatus();
+        }
+      });
+    }
+  });
+  
+  // Analyze button
+  document.getElementById('analyzeClaude').addEventListener('click', () => {
+    chrome.runtime.sendMessage({ action: 'getData' }, (data) => {
+      if (data.companies.length === 0) {
+        showStatus('No data to analyze', 'error');
+        return;
+      }
+      
+      // Show loading state
+      const analysisContent = document.getElementById('analysisContent');
+      analysisContent.textContent = 'Analyzing data with Claude...';
+      document.getElementById('claudeResults').style.display = 'block';
+      
+      // Send to Claude
+      chrome.runtime.sendMessage({
+        action: 'sendToClaude',
+        data: {
+          companies: data.companies.slice(-50), // Send last 50 companies
+          pageInfo: data.pages[data.pages.length - 1] || null
+        }
+      }, (response) => {
+        if (response.error) {
+          analysisContent.textContent = 'Error: ' + response.error;
+          showStatus('Analysis failed', 'error');
+        } else {
+          showStatus('Analysis sent to Claude', 'success');
+        }
+      });
+    });
+  });
+}
+
+function updateClaudeStatus() {
+  chrome.runtime.sendMessage({ action: 'getClaudeBridgeStatus' }, (status) => {
+    claudeBridgeConnected = status.connected;
+    
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const connectBtn = document.getElementById('connectClaude');
+    const analyzeBtn = document.getElementById('analyzeClaude');
+    
+    if (claudeBridgeConnected) {
+      statusDot.classList.add('connected');
+      statusText.textContent = 'Connected';
+      connectBtn.textContent = 'Disconnect';
+      connectBtn.classList.add('connected');
+      analyzeBtn.style.display = 'block';
+    } else {
+      statusDot.classList.remove('connected');
+      statusText.textContent = 'Disconnected';
+      connectBtn.textContent = 'Connect to Claude';
+      connectBtn.classList.remove('connected');
+      analyzeBtn.style.display = 'none';
+      document.getElementById('claudeResults').style.display = 'none';
+    }
+  });
+}
+
+// Listen for Claude Bridge status updates
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'claudeBridgeStatus') {
+    claudeBridgeConnected = message.connected;
+    updateClaudeStatus();
+  } else if (message.action === 'claudeAnalysisComplete') {
+    // Display analysis results
+    const analysisContent = document.getElementById('analysisContent');
+    analysisContent.textContent = message.data.result;
+    document.getElementById('claudeResults').style.display = 'block';
+    showStatus('Analysis complete!', 'success');
   }
 });

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test Fetch Functionality</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .section {
+      margin: 20px 0;
+      padding: 20px;
+      background: #f5f5f5;
+      border-radius: 5px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      border: none;
+      background: #4CAF50;
+      color: white;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    #output {
+      margin-top: 20px;
+      padding: 10px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      min-height: 100px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    input {
+      width: 100%;
+      padding: 10px;
+      margin: 10px 0;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧪 Test Fetch Functionality</h1>
+  
+  <div class="section">
+    <h2>Quick Diagnostics</h2>
+    <button onclick="checkPermissions()">Check Extension Permissions</button>
+    <button onclick="checkManifest()">Check Manifest</button>
+    <button onclick="testScriptingAPI()">Test Scripting API</button>
+  </div>
+  
+  <div class="section">
+    <h2>Alternative Fetch Methods</h2>
+    <input type="text" id="testUrl" placeholder="Enter URL to test" value="https://example.com">
+    <button onclick="testTabMethod()">Test Tab Method</button>
+    <button onclick="testFetchMethod()">Test Fetch Method</button>
+    <button onclick="testMessageMethod()">Test Message Method</button>
+  </div>
+  
+  <div id="output"></div>
+  
+  <script>
+    const output = document.getElementById('output');
+    
+    function log(message) {
+      output.textContent += message + '\n\n';
+      console.log(message);
+    }
+    
+    function clearLog() {
+      output.textContent = '';
+    }
+    
+    // Check permissions
+    async function checkPermissions() {
+      clearLog();
+      log('Checking extension permissions...');
+      
+      try {
+        const manifest = chrome.runtime.getManifest();
+        log('Permissions: ' + JSON.stringify(manifest.permissions, null, 2));
+        log('Host Permissions: ' + JSON.stringify(manifest.host_permissions, null, 2));
+        
+        // Check if we have scripting permission
+        const hasScripting = manifest.permissions.includes('scripting');
+        log('Has scripting permission: ' + (hasScripting ? 'YES ✓' : 'NO ✗'));
+        
+        // Check if we have tabs permission
+        const hasTabs = manifest.permissions.includes('tabs');
+        log('Has tabs permission: ' + (hasTabs ? 'YES ✓' : 'NO ✗'));
+        
+      } catch (error) {
+        log('Error checking permissions: ' + error.message);
+      }
+    }
+    
+    // Check manifest
+    async function checkManifest() {
+      clearLog();
+      log('Checking manifest...');
+      
+      try {
+        const manifest = chrome.runtime.getManifest();
+        log('Manifest Version: ' + manifest.manifest_version);
+        log('Extension Name: ' + manifest.name);
+        log('Extension Version: ' + manifest.version);
+      } catch (error) {
+        log('Error checking manifest: ' + error.message);
+      }
+    }
+    
+    // Test scripting API
+    async function testScriptingAPI() {
+      clearLog();
+      log('Testing scripting API...');
+      
+      try {
+        // Try to get current tab
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        log('Current tab URL: ' + tab.url);
+        
+        // Try to execute a simple script
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            return {
+              title: document.title,
+              url: window.location.href,
+              readyState: document.readyState
+            };
+          }
+        });
+        
+        if (results && results[0]) {
+          log('Script execution successful!');
+          log('Result: ' + JSON.stringify(results[0].result, null, 2));
+        } else {
+          log('Script execution returned no results');
+        }
+      } catch (error) {
+        log('Error testing scripting API: ' + error.message);
+        log('This might be normal if testing on chrome:// or extension pages');
+      }
+    }
+    
+    // Test tab method
+    async function testTabMethod() {
+      clearLog();
+      const url = document.getElementById('testUrl').value;
+      log('Testing tab method with URL: ' + url);
+      
+      try {
+        const tab = await chrome.tabs.create({ url: url, active: false });
+        log('Tab created with ID: ' + tab.id);
+        
+        // Wait for tab to load
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            return {
+              html: document.documentElement.outerHTML.substring(0, 500) + '...',
+              title: document.title,
+              url: window.location.href
+            };
+          }
+        });
+        
+        if (results && results[0] && results[0].result) {
+          log('Success! Page data retrieved:');
+          log(JSON.stringify(results[0].result, null, 2));
+        } else {
+          log('Failed to get page content');
+        }
+        
+        await chrome.tabs.remove(tab.id);
+        log('Tab removed');
+      } catch (error) {
+        log('Error with tab method: ' + error.message);
+      }
+    }
+    
+    // Test fetch method (limited by CORS)
+    async function testFetchMethod() {
+      clearLog();
+      const url = document.getElementById('testUrl').value;
+      log('Testing fetch method with URL: ' + url);
+      log('Note: This will likely fail due to CORS unless the target allows cross-origin requests');
+      
+      try {
+        const response = await fetch(url);
+        const text = await response.text();
+        log('Success! Got ' + text.length + ' characters');
+        log('First 500 chars: ' + text.substring(0, 500) + '...');
+      } catch (error) {
+        log('Error with fetch method: ' + error.message);
+        log('This is expected due to CORS restrictions');
+      }
+    }
+    
+    // Test message method
+    async function testMessageMethod() {
+      clearLog();
+      const url = document.getElementById('testUrl').value;
+      log('Testing message method...');
+      
+      try {
+        // Send message to background script
+        const response = await chrome.runtime.sendMessage({
+          action: 'fetchPage',
+          url: url
+        });
+        
+        if (response && response.success) {
+          log('Success! Page fetched via background script');
+          log('Content length: ' + response.html.length);
+        } else {
+          log('Background script returned error: ' + (response?.error || 'Unknown'));
+        }
+      } catch (error) {
+        log('Error with message method: ' + error.message);
+        log('Make sure background script has a handler for fetchPage action');
+      }
+    }
+  </script>
+</body>
+</html>

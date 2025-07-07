@@ -309,6 +309,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       getProxyStatus().then(status => sendResponse(status));
       break;
       
+    case 'harvestPage':
+      handlePageHarvest(request.data).then(result => sendResponse(result));
+      break;
+      
+    case 'findMatchingTemplate':
+      // This needs to be handled by the dashboard which has access to IndexedDB
+      // For now, return null - the dashboard will need to handle this
+      sendResponse({ template: null });
+      break;
+      
     default:
       console.log('Unknown action:', request.action);
       sendResponse({ error: 'Unknown action' });
@@ -1157,4 +1167,305 @@ async function browseNextUrlEnhanced() {
 // Replace the original browseNextUrl function
 browseNextUrl = browseNextUrlEnhanced;
 
-console.log('Background script initialized with intelligent site mapping and stealth features');
+// URL Pattern matching function
+function matchUrlPattern(url, pattern) {
+  try {
+    // Replace pattern variables with regex
+    let regexPattern = pattern
+      .replace('{domain}', '([^/]+)')
+      .replace(/{id}/g, '(\\d+)')
+      .replace(/{slug}/g, '([a-z0-9-_]+)')
+      .replace(/{\\*}/g, '([^/]+)');
+    
+    // Build full regex
+    const fullPattern = `^https?://(?:www\\.)?${regexPattern}/?$`;
+    const regex = new RegExp(fullPattern, 'i');
+    
+    // Test the full URL
+    return regex.test(url);
+  } catch (error) {
+    console.error('Error matching URL pattern:', error);
+    return false;
+  }
+}
+
+// HTML Harvesting functionality
+async function handlePageHarvest(pageData) {
+  try {
+    // Load harvester settings
+    const result = await chrome.storage.local.get(['harvesterSettings']);
+    const settings = result.harvesterSettings || { 
+      autoHarvest: true, 
+      applyTemplates: true,
+      useUrlPatternMatching: true,
+      compressStorage: true
+    };
+    
+    if (!settings.autoHarvest) {
+      return { success: false, message: 'Auto-harvest disabled' };
+    }
+    
+    // Check for URL pattern matching
+    let selectedTemplate = null;
+    if (settings.useUrlPatternMatching && settings.applyTemplates) {
+      // Get template patterns from Chrome storage
+      const patternsResult = await chrome.storage.local.get(['templatePatterns']);
+      const templatePatterns = patternsResult.templatePatterns || [];
+      
+      // Find matching template
+      for (const template of templatePatterns) {
+        if (template.urlPatterns && template.urlPatterns.length > 0) {
+          for (const pattern of template.urlPatterns) {
+            if (matchUrlPattern(pageData.url, pattern)) {
+              selectedTemplate = template;
+              console.log('🎯 Matched template:', selectedTemplate.name, 'with pattern:', pattern);
+              break;
+            }
+          }
+          if (selectedTemplate) break;
+        }
+      }
+    }
+    
+    // Fall back to default template if no pattern match
+    if (!selectedTemplate && settings.defaultTemplate && settings.defaultTemplate !== 'none') {
+      selectedTemplate = { name: settings.defaultTemplate };
+    }
+    
+    // Simple HTML stripping for background script
+    let cleanedHTML = pageData.html;
+    const originalSize = new Blob([pageData.html]).size;
+    
+    // Basic stripping
+    cleanedHTML = cleanedHTML.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+    cleanedHTML = cleanedHTML.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+    cleanedHTML = cleanedHTML.replace(/<!--[\s\S]*?-->/g, '');
+    cleanedHTML = cleanedHTML.replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '');
+    
+    const cleanedSize = new Blob([cleanedHTML]).size;
+    const reduction = Math.round((1 - cleanedSize / originalSize) * 100);
+    
+    // Store harvested page data
+    const harvestData = {
+      url: pageData.url,
+      title: pageData.title,
+      timestamp: pageData.timestamp,
+      originalSize: originalSize,
+      cleanedSize: cleanedSize,
+      reduction: reduction + '%',
+      cleanedHTML: cleanedHTML,
+      template: selectedTemplate ? selectedTemplate.name : null,
+      matchedByPattern: selectedTemplate && settings.useUrlPatternMatching
+    };
+    
+    // Get existing harvested pages
+    const harvestedResult = await chrome.storage.local.get(['harvestedPages']);
+    let harvestedPages = harvestedResult.harvestedPages || [];
+    
+    // Add new page (limit to 100 pages to avoid storage issues)
+    harvestedPages.unshift(harvestData);
+    if (harvestedPages.length > 100) {
+      harvestedPages = harvestedPages.slice(0, 100);
+    }
+    
+    // Save back to storage
+    await chrome.storage.local.set({ harvestedPages: harvestedPages });
+    
+    console.log('✅ Page harvested:', pageData.url, 'Reduction:', reduction + '%');
+    
+    return { success: true, reduction: reduction + '%', totalPages: harvestedPages.length };
+  } catch (error) {
+    console.error('Error harvesting page:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Initialize extension
+chrome.runtime.onInstalled.addListener(async () => {
+  console.log('Extension installed/updated');
+  
+  // Initialize collection tags
+  await loadCollectionTags();
+  
+  // Note: Template syncing is handled by the dashboard when templates are saved
+  // The background script reads from chrome.storage.local when needed
+});
+
+// Also initialize when the background script loads
+(async () => {
+  await loadCollectionTags();
+  console.log('Background script initialized with intelligent site mapping and stealth features');
+})();
+
+// ============= Claude Bridge Integration =============
+
+let claudeBridge = {
+  ws: null,
+  connected: false,
+  reconnectInterval: null,
+  serverUrl: 'ws://localhost:8765',
+  reconnectDelay: 5000
+};
+
+// Connect to Claude Bridge Server
+function connectToClaudeBridge() {
+  if (claudeBridge.ws && claudeBridge.ws.readyState === WebSocket.OPEN) {
+    console.log('Already connected to Claude Bridge');
+    return;
+  }
+  
+  try {
+    console.log('Connecting to Claude Bridge at:', claudeBridge.serverUrl);
+    claudeBridge.ws = new WebSocket(claudeBridge.serverUrl);
+    
+    claudeBridge.ws.onopen = () => {
+      console.log('✅ Connected to Claude Bridge Server');
+      claudeBridge.connected = true;
+      
+      // Clear reconnect interval
+      if (claudeBridge.reconnectInterval) {
+        clearInterval(claudeBridge.reconnectInterval);
+        claudeBridge.reconnectInterval = null;
+      }
+      
+      // Notify popup
+      chrome.runtime.sendMessage({
+        action: 'claudeBridgeStatus',
+        connected: true
+      }).catch(() => {});
+    };
+    
+    claudeBridge.ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('Received from Claude Bridge:', data.type);
+        
+        // Handle different message types
+        switch (data.type) {
+          case 'connected':
+            console.log('Claude Bridge:', data.message);
+            break;
+          case 'analysis':
+            handleClaudeAnalysis(data);
+            break;
+          case 'error':
+            console.error('Claude Bridge error:', data.error);
+            break;
+        }
+      } catch (error) {
+        console.error('Error parsing Claude Bridge message:', error);
+      }
+    };
+    
+    claudeBridge.ws.onclose = () => {
+      console.log('Disconnected from Claude Bridge');
+      claudeBridge.connected = false;
+      claudeBridge.ws = null;
+      
+      // Notify popup
+      chrome.runtime.sendMessage({
+        action: 'claudeBridgeStatus',
+        connected: false
+      }).catch(() => {});
+      
+      // Setup reconnection
+      if (!claudeBridge.reconnectInterval) {
+        claudeBridge.reconnectInterval = setInterval(() => {
+          console.log('Attempting to reconnect to Claude Bridge...');
+          connectToClaudeBridge();
+        }, claudeBridge.reconnectDelay);
+      }
+    };
+    
+    claudeBridge.ws.onerror = (error) => {
+      console.error('Claude Bridge WebSocket error:', error);
+    };
+    
+  } catch (error) {
+    console.error('Failed to connect to Claude Bridge:', error);
+  }
+}
+
+// Send data to Claude for analysis
+async function sendToClaudeForAnalysis(data) {
+  if (!claudeBridge.connected || !claudeBridge.ws) {
+    console.error('Not connected to Claude Bridge');
+    return { error: 'Not connected to Claude Bridge Server' };
+  }
+  
+  try {
+    const message = {
+      type: 'analyze',
+      companies: data.companies || collectedData.companies,
+      pageInfo: data.pageInfo,
+      prompt: data.prompt
+    };
+    
+    claudeBridge.ws.send(JSON.stringify(message));
+    console.log('Sent data to Claude for analysis');
+    
+    return { success: true };
+  } catch (error) {
+    console.error('Error sending to Claude:', error);
+    return { error: error.message };
+  }
+}
+
+// Handle Claude analysis results
+function handleClaudeAnalysis(data) {
+  console.log('Claude analysis complete');
+  
+  // Store the latest analysis
+  chrome.storage.local.set({
+    'latestClaudeAnalysis': {
+      result: data.result,
+      summary: data.summary,
+      timestamp: data.timestamp
+    }
+  });
+  
+  // Notify any listeners
+  chrome.runtime.sendMessage({
+    action: 'claudeAnalysisComplete',
+    data: data
+  }).catch(() => {});
+}
+
+// Add message handlers for Claude Bridge
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'connectToClaude') {
+    connectToClaudeBridge();
+    sendResponse({ success: true });
+    return true;
+  }
+  
+  if (request.action === 'getClaudeBridgeStatus') {
+    sendResponse({
+      connected: claudeBridge.connected,
+      serverUrl: claudeBridge.serverUrl
+    });
+    return true;
+  }
+  
+  if (request.action === 'sendToClaude') {
+    sendToClaudeForAnalysis(request.data).then(result => {
+      sendResponse(result);
+    });
+    return true;
+  }
+  
+  if (request.action === 'disconnectFromClaude') {
+    if (claudeBridge.ws) {
+      claudeBridge.ws.close();
+    }
+    if (claudeBridge.reconnectInterval) {
+      clearInterval(claudeBridge.reconnectInterval);
+      claudeBridge.reconnectInterval = null;
+    }
+    sendResponse({ success: true });
+    return true;
+  }
+});
+
+// Auto-connect on startup (optional)
+// connectToClaudeBridge();
