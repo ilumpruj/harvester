@@ -558,11 +558,11 @@ async function getSettings() {
 let autoSaveInterval;
 function scheduleAutoSave() {
   const baseInterval = 30000; // 30 seconds
-  const nextInterval = window.StealthUtils ? StealthUtils.randomDelay(baseInterval, 0.3) : baseInterval;
+  const nextInterval = (typeof StealthUtils !== 'undefined' && StealthUtils) ? StealthUtils.randomDelay(baseInterval, 0.3) : baseInterval;
   
   autoSaveInterval = setTimeout(() => {
     if (collectedData.companies.length > 0) {
-      const log = window.StealthUtils ? StealthUtils.stealthLog : console;
+      const log = (typeof StealthUtils !== 'undefined' && StealthUtils) ? StealthUtils.stealthLog : console;
       log.log(`💾 Auto-saving ${collectedData.companies.length} companies...`);
       saveData().catch(error => {
         log.error('❌ Save failed:', error);
@@ -644,11 +644,11 @@ function isNavigationUrl(url) {
 }
 
 // Rate limiter instance
-const rateLimiter = window.StealthUtils ? new StealthUtils.RateLimiter() : null;
+const rateLimiter = (typeof StealthUtils !== 'undefined' && StealthUtils) ? new StealthUtils.RateLimiter() : null;
 
 // Auto-browse with stealth enhancements
 function startAutoBrowse(settings = {}) {
-  const log = window.StealthUtils ? StealthUtils.stealthLog : console;
+  const log = (typeof StealthUtils !== 'undefined' && StealthUtils) ? StealthUtils.stealthLog : console;
   log.log('Starting auto-browse with stealth mode...');
   
   // Update settings
@@ -670,10 +670,10 @@ function scheduleNextBrowse() {
   
   // Calculate next delay with randomization
   const baseDelay = autoBrowseState.interval;
-  const nextDelay = window.StealthUtils ? 
+  const nextDelay = (typeof StealthUtils !== 'undefined' && StealthUtils) ? 
     StealthUtils.randomDelay(baseDelay, 0.4) : baseDelay;
   
-  const log = window.StealthUtils ? StealthUtils.stealthLog : console;
+  const log = (typeof StealthUtils !== 'undefined' && StealthUtils) ? StealthUtils.stealthLog : console;
   log.info(`Next browse in ${nextDelay}ms`);
   
   autoBrowseState.intervalId = setTimeout(async () => {
@@ -695,7 +695,7 @@ function stopAutoBrowse() {
 }
 
 async function browseNextUrl() {
-  const log = window.StealthUtils ? StealthUtils.stealthLog : console;
+  const log = (typeof StealthUtils !== 'undefined' && StealthUtils) ? StealthUtils.stealthLog : console;
   const unvisitedUrls = getUnvisitedUrls();
   
   if (unvisitedUrls.length === 0) {
@@ -778,7 +778,7 @@ async function browseNextUrl() {
     
     // Wait with randomized duration for content extraction
     const baseTabDuration = 15000; // 15 seconds base
-    const tabDuration = window.StealthUtils ? 
+    const tabDuration = (typeof StealthUtils !== 'undefined' && StealthUtils) ? 
       StealthUtils.randomDelay(baseTabDuration, 0.4) : baseTabDuration;
     
     setTimeout(async () => {
@@ -962,7 +962,7 @@ const siteMap = new SiteMap();
 
 // Blocking detection handler
 function handleBlockingDetection(request) {
-  const log = window.StealthUtils ? StealthUtils.stealthLog : console;
+  const log = (typeof StealthUtils !== 'undefined' && StealthUtils) ? StealthUtils.stealthLog : console;
   log.warn('🚫 Blocking detected:', request);
   
   // Stop auto-browse if running

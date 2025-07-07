@@ -419,9 +419,9 @@ if (typeof module !== 'undefined' && module.exports) {
   };
 }
 
-// For use in background scripts
-if (typeof chrome !== 'undefined' && chrome.runtime) {
-  window.StealthUtils = {
+// For use in service workers and background scripts
+if (typeof self !== 'undefined') {
+  self.StealthUtils = {
     STEALTH_CONFIG,
     randomDelay,
     randomSleep,
