@@ -14,6 +14,22 @@ let autoBrowseState = {
   intervalId: null
 };
 
+// Harvester-specific auto-browse functionality
+let harvesterAutoBrowseState = {
+  enabled: false,
+  interval: 30000, // 30 seconds default
+  currentIndex: 0,
+  harvestedUrls: new Set(),
+  queuedUrls: [], // URLs that match active templates
+  intervalId: null,
+  stats: {
+    totalQueued: 0,
+    totalHarvested: 0,
+    successfulHarvests: 0,
+    failedHarvests: 0
+  }
+};
+
 // Collection page management
 let collectionTags = [];
 
@@ -235,6 +251,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: true });
       break;
       
+    case 'startHarvesterAutoBrowse':
+      startHarvesterAutoBrowse().then(result => {
+        sendResponse(result);
+      });
+      return true; // Will respond asynchronously
+      
+    case 'stopHarvesterAutoBrowse':
+      const stopResult = stopHarvesterAutoBrowse();
+      sendResponse(stopResult);
+      break;
+      
+    case 'getHarvesterAutoBrowseState':
+      sendResponse({
+        ...harvesterAutoBrowseState,
+        queuedCount: harvesterAutoBrowseState.queuedUrls.length
+      });
+      break;
+      
+    case 'getHarvesterTargetUrls':
+      getHarvesterTargetUrls().then(urls => {
+        sendResponse({ urls, count: urls.length });
+      });
+      return true; // Will respond asynchronously
+      
     case 'getCollectionTags':
       sendResponse({ tags: collectionTags });
       break;
@@ -317,6 +357,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // This needs to be handled by the dashboard which has access to IndexedDB
       // For now, return null - the dashboard will need to handle this
       sendResponse({ template: null });
+      break;
+      
+    case 'getAllUrls':
+      // Return all collected URLs for template matching calculations
+      const allUrls = collectedData.companies.map(company => company.url) || [];
+      sendResponse({ urls: allUrls, count: allUrls.length });
+      break;
+      
+    case 'getHarvesterTargetUrls':
+      getHarvesterTargetUrls().then(urls => sendResponse({ urls, count: urls.length }));
+      break;
+      
+    case 'getHarvesterAutoBrowseState':
+      sendResponse(harvesterAutoBrowseState);
+      break;
+      
+    case 'startHarvesterAutoBrowse':
+      startHarvesterAutoBrowse().then(result => sendResponse(result));
+      break;
+      
+    case 'stopHarvesterAutoBrowse':
+      sendResponse(stopHarvesterAutoBrowse());
       break;
       
     default:
@@ -1167,22 +1229,237 @@ async function browseNextUrlEnhanced() {
 // Replace the original browseNextUrl function
 browseNextUrl = browseNextUrlEnhanced;
 
+// Filter URLs that match active template patterns
+async function getHarvesterTargetUrls() {
+  try {
+    // Get all URLs from collected data (companies array contains the URLs)
+    const allUrls = collectedData.companies.map(company => company.url) || [];
+    console.log(`Total URLs collected: ${allUrls.length}`);
+    console.log('Sample URLs:', allUrls.slice(0, 5));
+    
+    // Get template patterns from Chrome storage
+    const patternsResult = await chrome.storage.local.get(['templatePatterns']);
+    const templatePatterns = patternsResult.templatePatterns || [];
+    console.log('Template patterns loaded:', templatePatterns);
+    
+    // Filter only active templates
+    const activeTemplates = templatePatterns.filter(t => t.isActive && t.urlPatterns && t.urlPatterns.length > 0);
+    console.log(`Active templates with patterns: ${activeTemplates.length}`);
+    
+    if (activeTemplates.length === 0) {
+      console.log('No active templates with URL patterns found');
+      return [];
+    }
+    
+    // Log active templates for debugging
+    activeTemplates.forEach(template => {
+      console.log(`Active template: ${template.name}, patterns:`, template.urlPatterns);
+    });
+    
+    // Filter URLs that match any active template pattern
+    const matchingUrls = allUrls.filter(url => {
+      // Skip already harvested URLs
+      if (harvesterAutoBrowseState.harvestedUrls.has(normalizeUrl(url))) {
+        return false;
+      }
+      
+      // Check if URL matches any active template pattern
+      for (const template of activeTemplates) {
+        for (const pattern of template.urlPatterns) {
+          if (matchUrlPattern(url, pattern)) {
+            console.log(`✅ URL ${url} matches template ${template.name} with pattern ${pattern}`);
+            return true;
+          }
+        }
+      }
+      return false;
+    });
+    
+    console.log(`Found ${matchingUrls.length} URLs matching active template patterns`);
+    if (matchingUrls.length > 0) {
+      console.log('Matching URLs:', matchingUrls.slice(0, 10));
+    }
+    return matchingUrls;
+  } catch (error) {
+    console.error('Error filtering harvester URLs:', error);
+    return [];
+  }
+}
+
+// Browse next URL for harvester
+async function browseNextUrlForHarvester() {
+  if (!harvesterAutoBrowseState.enabled) {
+    console.log('Harvester auto-browse stopped');
+    return;
+  }
+  
+  // Check if we've processed all URLs
+  if (harvesterAutoBrowseState.currentIndex >= harvesterAutoBrowseState.queuedUrls.length) {
+    console.log('✅ Harvester auto-browse completed all URLs');
+    chrome.runtime.sendMessage({
+      action: 'harvesterAutoBrowseComplete',
+      stats: harvesterAutoBrowseState.stats
+    }).catch(() => {});
+    stopHarvesterAutoBrowse();
+    return;
+  }
+  
+  try {
+    // Get the next URL from the queue
+    const url = harvesterAutoBrowseState.queuedUrls[harvesterAutoBrowseState.currentIndex];
+    
+    if (!url) {
+      console.log('No URL found at index', harvesterAutoBrowseState.currentIndex);
+      harvesterAutoBrowseState.currentIndex++;
+      return;
+    }
+    
+    console.log(`🌐 Harvester visiting (${harvesterAutoBrowseState.currentIndex + 1}/${harvesterAutoBrowseState.queuedUrls.length}): ${url}`);
+    
+    // Update progress
+    chrome.runtime.sendMessage({
+      action: 'harvesterAutoBrowseUpdate',
+      currentUrl: url,
+      progress: `${harvesterAutoBrowseState.currentIndex + 1}/${harvesterAutoBrowseState.queuedUrls.length}`,
+      stats: harvesterAutoBrowseState.stats
+    }).catch(() => {});
+    
+    // Open the URL in a new tab
+    const tab = await chrome.tabs.create({ url: url, active: false });
+    
+    // Wait for the page to load and harvest
+    setTimeout(async () => {
+      try {
+        // The content script will auto-harvest if enabled
+        // Mark as harvested
+        harvesterAutoBrowseState.harvestedUrls.add(normalizeUrl(url));
+        harvesterAutoBrowseState.stats.totalHarvested++;
+        harvesterAutoBrowseState.stats.successfulHarvests++;
+        
+        // Close the tab
+        await chrome.tabs.remove(tab.id);
+        
+        console.log(`✅ Harvested: ${url}`);
+        
+      } catch (error) {
+        console.error('Error during harvester browse:', error);
+        harvesterAutoBrowseState.stats.failedHarvests++;
+      } finally {
+        // Move to next URL regardless of success/failure
+        harvesterAutoBrowseState.currentIndex++;
+        
+        // Schedule next browse if still enabled
+        if (harvesterAutoBrowseState.enabled && harvesterAutoBrowseState.currentIndex < harvesterAutoBrowseState.queuedUrls.length) {
+          setTimeout(() => {
+            browseNextUrlForHarvester();
+          }, harvesterAutoBrowseState.interval);
+        }
+      }
+    }, 15000); // Give 15 seconds for page to load and harvest
+    
+  } catch (error) {
+    console.error('Error in harvester auto-browse:', error);
+    harvesterAutoBrowseState.currentIndex++;
+    harvesterAutoBrowseState.stats.failedHarvests++;
+    
+    // Try next URL after delay
+    if (harvesterAutoBrowseState.enabled) {
+      setTimeout(() => {
+        browseNextUrlForHarvester();
+      }, 5000);
+    }
+  }
+}
+
+// Start harvester auto-browse
+async function startHarvesterAutoBrowse() {
+  if (harvesterAutoBrowseState.enabled) {
+    console.log('Harvester auto-browse already running');
+    return { success: false, message: 'Already running' };
+  }
+  
+  try {
+    // Get URLs matching active templates
+    const matchingUrls = await getHarvesterTargetUrls();
+    
+    if (matchingUrls.length === 0) {
+      return { 
+        success: false, 
+        message: 'No URLs found matching active template patterns' 
+      };
+    }
+    
+    // Initialize state
+    harvesterAutoBrowseState.enabled = true;
+    harvesterAutoBrowseState.currentIndex = 0;
+    harvesterAutoBrowseState.queuedUrls = matchingUrls;
+    harvesterAutoBrowseState.stats.totalQueued = matchingUrls.length;
+    harvesterAutoBrowseState.stats.totalHarvested = 0;
+    harvesterAutoBrowseState.stats.successfulHarvests = 0;
+    harvesterAutoBrowseState.stats.failedHarvests = 0;
+    
+    console.log(`🚀 Starting harvester auto-browse with ${matchingUrls.length} URLs`);
+    
+    // Start browsing the first URL
+    browseNextUrlForHarvester();
+    
+    return { 
+      success: true, 
+      urlCount: matchingUrls.length,
+      stats: harvesterAutoBrowseState.stats
+    };
+    
+  } catch (error) {
+    console.error('Error starting harvester auto-browse:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Stop harvester auto-browse
+function stopHarvesterAutoBrowse() {
+  harvesterAutoBrowseState.enabled = false;
+  
+  if (harvesterAutoBrowseState.intervalId) {
+    clearInterval(harvesterAutoBrowseState.intervalId);
+    harvesterAutoBrowseState.intervalId = null;
+  }
+  
+  console.log('🛑 Harvester auto-browse stopped');
+  
+  return { 
+    success: true, 
+    stats: harvesterAutoBrowseState.stats 
+  };
+}
+
 // URL Pattern matching function
 function matchUrlPattern(url, pattern) {
   try {
-    // Replace pattern variables with regex
-    let regexPattern = pattern
-      .replace('{domain}', '([^/]+)')
-      .replace(/{id}/g, '(\\d+)')
-      .replace(/{slug}/g, '([a-z0-9-_]+)')
-      .replace(/{\\*}/g, '([^/]+)');
+    console.log(`Matching URL: ${url} against pattern: ${pattern}`);
     
-    // Build full regex
-    const fullPattern = `^https?://(?:www\\.)?${regexPattern}/?$`;
+    // Escape special regex characters first
+    let regexPattern = pattern
+      .replace(/\./g, '\\.')
+      .replace(/\//g, '\\/');
+    
+    // Replace pattern variables with regex
+    regexPattern = regexPattern
+      .replace(/\{domain\}/g, '[^/]+')
+      .replace(/\{id\}/g, '\\d+')
+      .replace(/\{slug\}/g, '[a-z0-9-_]+')
+      .replace(/\{\*\}/g, '[^/]+');
+    
+    // Build full regex - the pattern already includes protocol
+    const fullPattern = `^${regexPattern}/?$`;
     const regex = new RegExp(fullPattern, 'i');
     
+    console.log(`Generated regex: ${fullPattern}`);
+    
     // Test the full URL
-    return regex.test(url);
+    const matches = regex.test(url);
+    console.log(`Match result: ${matches}`);
+    
+    return matches;
   } catch (error) {
     console.error('Error matching URL pattern:', error);
     return false;
@@ -1214,6 +1491,9 @@ async function handlePageHarvest(pageData) {
       
       // Find matching template
       for (const template of templatePatterns) {
+        // Skip inactive templates
+        if (!template.isActive) continue;
+        
         if (template.urlPatterns && template.urlPatterns.length > 0) {
           for (const pattern of template.urlPatterns) {
             if (matchUrlPattern(pageData.url, pattern)) {

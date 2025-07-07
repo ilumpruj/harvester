@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self';">
   <title>Sortlist Harvester Dashboard</title>
   <style>
     body {
@@ -727,7 +727,7 @@
             <div style="display: flex; gap: 10px; align-items: center;">
               <input type="text" id="urlPattern" placeholder="Pattern will appear here..." 
                      style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-family: monospace; font-size: 14px;">
-              <button class="btn-secondary" onclick="editUrlPattern()" style="padding: 8px 15px;">
+              <button class="btn-secondary" id="editUrlPattern" style="padding: 8px 15px;">
                 ✏️ Edit
               </button>
             </div>
@@ -741,8 +741,8 @@
         <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 20px 0;">
           <h3>🧹 Stripping Options</h3>
           <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-            <button type="button" class="btn-secondary" onclick="toggleAllCheckboxes('stripping', true)" style="padding: 5px 15px; font-size: 12px;">✓ Check All</button>
-            <button type="button" class="btn-secondary" onclick="toggleAllCheckboxes('stripping', false)" style="padding: 5px 15px; font-size: 12px;">✗ Uncheck All</button>
+            <button type="button" class="btn-secondary toggle-checkboxes" data-type="stripping" data-checked="true" style="padding: 5px 15px; font-size: 12px;">✓ Check All</button>
+            <button type="button" class="btn-secondary toggle-checkboxes" data-type="stripping" data-checked="false" style="padding: 5px 15px; font-size: 12px;">✗ Uncheck All</button>
           </div>
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin: 15px 0;">
             <label style="display: flex; align-items: center; gap: 8px;">
@@ -789,8 +789,8 @@
           
           <h4 style="margin-top: 20px;">🎯 Keep Options</h4>
           <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-            <button type="button" class="btn-secondary" onclick="toggleAllCheckboxes('keep', true)" style="padding: 5px 15px; font-size: 12px;">✓ Check All</button>
-            <button type="button" class="btn-secondary" onclick="toggleAllCheckboxes('keep', false)" style="padding: 5px 15px; font-size: 12px;">✗ Uncheck All</button>
+            <button type="button" class="btn-secondary toggle-checkboxes" data-type="keep" data-checked="true" style="padding: 5px 15px; font-size: 12px;">✓ Check All</button>
+            <button type="button" class="btn-secondary toggle-checkboxes" data-type="keep" data-checked="false" style="padding: 5px 15px; font-size: 12px;">✗ Uncheck All</button>
           </div>
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin: 15px 0;">
             <label style="display: flex; align-items: center; gap: 8px;">
@@ -894,6 +894,10 @@
             <div class="stat-number" id="pagesHarvested">0</div>
           </div>
           <div class="stat-card">
+            <div class="stat-label">Pages to Harvest</div>
+            <div class="stat-number" id="pagesToHarvest" style="color: #2196F3;">0</div>
+          </div>
+          <div class="stat-card">
             <div class="stat-label">Total Storage</div>
             <div class="stat-number" id="totalStorage" style="font-size: 24px;">0 MB</div>
           </div>
@@ -944,6 +948,70 @@
                 <option value="company">Company Profile</option>
                 <option value="listing">Listing Page</option>
               </select>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Harvester Auto-Browse -->
+        <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 20px 0;">
+          <h3>🤖 Harvester Auto-Browse</h3>
+          <p style="color: #666; font-size: 14px; margin: 10px 0;">
+            Automatically browse and harvest only URLs that match your active template patterns. This is separate from the discovery auto-browse.
+          </p>
+          
+          <!-- Status and Controls -->
+          <div style="margin: 20px 0;">
+            <div id="harvesterAutoBrowseStatus" style="padding: 15px; background: #f5f5f5; border-radius: 5px; margin-bottom: 15px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <strong>Status:</strong> <span id="harvesterStatus" style="color: #999;">Not Running</span>
+                </div>
+                <div>
+                  <strong>Progress:</strong> <span id="harvesterProgress">0/0</span>
+                </div>
+              </div>
+              <div style="margin-top: 10px;">
+                <strong>URLs Matching Active Templates:</strong> <span id="matchingUrlCount">0</span>
+              </div>
+            </div>
+            
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <button class="btn" id="startHarvesterAutoBrowse" style="background: #2196F3;">
+                ▶️ Start Harvester Auto-Browse
+              </button>
+              <button class="btn-secondary" id="stopHarvesterAutoBrowse" disabled>
+                ⏹️ Stop
+              </button>
+              <button class="btn-secondary" id="previewHarvesterUrls">
+                👁️ Preview URLs
+              </button>
+              <button class="btn-secondary" id="debugHarvesterUrls">
+                🐛 Debug
+              </button>
+            </div>
+          </div>
+          
+          <!-- Harvester Stats -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-top: 20px;">
+            <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; text-align: center;">
+              <div style="font-size: 24px; font-weight: bold; color: #4CAF50;" id="harvesterSuccessCount">0</div>
+              <div style="color: #666; font-size: 12px;">Successful</div>
+            </div>
+            <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; text-align: center;">
+              <div style="font-size: 24px; font-weight: bold; color: #f44336;" id="harvesterFailedCount">0</div>
+              <div style="color: #666; font-size: 12px;">Failed</div>
+            </div>
+            <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; text-align: center;">
+              <div style="font-size: 24px; font-weight: bold; color: #2196F3;" id="harvesterPendingCount">0</div>
+              <div style="color: #666; font-size: 12px;">Pending</div>
+            </div>
+          </div>
+          
+          <!-- Active Templates Info -->
+          <div style="margin-top: 20px; padding: 15px; background: #e3f2fd; border-radius: 5px;">
+            <strong>Active Templates:</strong>
+            <div id="activeTemplatesList" style="margin-top: 8px;">
+              <span style="color: #666;">Loading...</span>
             </div>
           </div>
         </div>
@@ -1011,25 +1079,5 @@
   <script src="html-stripper.js"></script>
   <script src="html-storage.js"></script>
   <script src="dashboard.js"></script>
-  <script>
-    // Toggle all checkboxes function
-    function toggleAllCheckboxes(type, checked) {
-      const prefix = type === 'stripping' ? 'strip' : 'keep';
-      const checkboxes = document.querySelectorAll(`input[type="checkbox"][id^="${prefix}"]`);
-      checkboxes.forEach(cb => cb.checked = checked);
-      
-      // Trigger change event to update stripper options
-      if (window.updateStripperOptions) {
-        window.updateStripperOptions();
-      }
-    }
-    
-    function editUrlPattern() {
-      const input = document.getElementById('urlPattern');
-      input.removeAttribute('readonly');
-      input.focus();
-      input.select();
-    }
-  </script>
 </body>
 </html>

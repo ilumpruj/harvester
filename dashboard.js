@@ -1384,6 +1384,9 @@ async function setupPostPreview() {
         template.urlPatterns = [urlPattern];
       }
       
+      // New templates are active by default
+      template.isActive = true;
+      
       await htmlStorage.saveTemplate(template);
       
       // Also save templates with patterns to Chrome storage for background script access
@@ -1415,12 +1418,31 @@ async function setupPostPreview() {
   // Update stripper options when checkboxes change
   const checkboxes = document.querySelectorAll('#post-preview-tab input[type="checkbox"]');
   checkboxes.forEach(checkbox => {
-    checkbox.addEventListener('change', updateStripperOptions);
+    checkbox.addEventListener('change', () => {
+      updateStripperOptions();
+      // Auto-apply if preview is loaded
+      if (currentPreviewData && currentPreviewData.html) {
+        applyStrippingOptions();
+        displayPreview();
+      }
+    });
   });
   
   // Template management
   document.getElementById('refreshTemplates').addEventListener('click', loadTemplatesList);
   document.getElementById('manageTemplates').addEventListener('click', openTemplateManager);
+  
+  // URL Pattern editing
+  document.getElementById('editUrlPattern').addEventListener('click', editUrlPattern);
+  
+  // Toggle checkboxes event delegation
+  document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('toggle-checkboxes')) {
+      const type = e.target.dataset.type;
+      const checked = e.target.dataset.checked === 'true';
+      toggleAllCheckboxes(type, checked);
+    }
+  });
   
   // Load templates on init
   loadTemplatesList();
@@ -1435,7 +1457,31 @@ function updateStripperOptions() {
   checkboxes.forEach(checkbox => {
     options[checkbox.id] = checkbox.checked;
   });
-  htmlStripper.options = options;
+  if (htmlStripper) {
+    htmlStripper.options = Object.assign(htmlStripper.options || {}, options);
+  }
+}
+
+// Make this function available globally for HTML onclick handlers
+window.updateStripperOptions = updateStripperOptions;
+
+// Toggle all checkboxes function
+function toggleAllCheckboxes(type, checked) {
+  const prefix = type === 'stripping' ? 'strip' : 'keep';
+  const checkboxes = document.querySelectorAll(`input[type="checkbox"][id^="${prefix}"]`);
+  checkboxes.forEach(cb => {
+    cb.checked = checked;
+    // Trigger change event to notify listeners
+    cb.dispatchEvent(new Event('change'));
+  });
+}
+
+// URL Pattern editing function
+function editUrlPattern() {
+  const input = document.getElementById('urlPattern');
+  input.removeAttribute('readonly');
+  input.focus();
+  input.select();
 }
 
 function applyStrippingOptions() {
@@ -1655,9 +1701,17 @@ async function setupHTMLHarvester() {
   document.getElementById('exportForClaude').addEventListener('click', exportAllForClaude);
   document.getElementById('clearHarvestedStorage').addEventListener('click', clearAllStorage);
   
+  // Harvester Auto-Browse event listeners
+  document.getElementById('startHarvesterAutoBrowse').addEventListener('click', startHarvesterAutoBrowse);
+  document.getElementById('stopHarvesterAutoBrowse').addEventListener('click', stopHarvesterAutoBrowse);
+  document.getElementById('previewHarvesterUrls').addEventListener('click', previewHarvesterUrls);
+  document.getElementById('debugHarvesterUrls').addEventListener('click', debugHarvesterUrls);
+  
   // Load initial data
   loadHarvesterStats();
   loadHarvestedPages();
+  updateHarvesterAutoBrowseUI();
+  listenForHarvesterUpdates();
 }
 
 async function initializeHTMLStorage() {
@@ -1676,6 +1730,60 @@ async function loadHarvesterStats() {
   // Load template count
   const templates = await htmlStorage.getTemplates();
   document.getElementById('templatesSaved').textContent = templates.length;
+  
+  // Calculate and display pages to harvest
+  const pagesToHarvest = await calculatePagesToHarvest();
+  document.getElementById('pagesToHarvest').textContent = pagesToHarvest;
+}
+
+// Calculate total pages that match active template patterns
+async function calculatePagesToHarvest() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getHarvesterTargetUrls' });
+    return response.urls ? response.urls.length : 0;
+  } catch (error) {
+    console.error('Error calculating pages to harvest:', error);
+    return 0;
+  }
+}
+
+// Calculate pages to harvest for a specific template pattern
+async function calculatePagesToHarvestForTemplate(patterns) {
+  try {
+    if (!patterns || patterns.length === 0) return { toHarvest: 0, harvested: 0 };
+    
+    // Get all collected URLs
+    const allUrls = await chrome.runtime.sendMessage({ action: 'getAllUrls' });
+    if (!allUrls || !allUrls.urls) return { toHarvest: 0, harvested: 0 };
+    
+    // Get harvested pages
+    const harvestedPages = await htmlStorage.getAllPages();
+    const harvestedUrls = harvestedPages.map(page => page.url);
+    
+    let matchingUrls = 0;
+    let harvestedMatching = 0;
+    
+    // Check each URL against the patterns
+    allUrls.urls.forEach(url => {
+      for (const pattern of patterns) {
+        if (matchUrlPattern(url, pattern)) {
+          matchingUrls++;
+          if (harvestedUrls.includes(url)) {
+            harvestedMatching++;
+          }
+          break; // Only count once per URL
+        }
+      }
+    });
+    
+    return { 
+      toHarvest: matchingUrls - harvestedMatching, 
+      harvested: harvestedMatching 
+    };
+  } catch (error) {
+    console.error('Error calculating template-specific harvest stats:', error);
+    return { toHarvest: 0, harvested: 0 };
+  }
 }
 
 async function loadHarvestedPages() {
@@ -1776,6 +1884,7 @@ async function loadHarvesterSettings() {
   return result.harvesterSettings || {
     autoHarvest: true,
     applyTemplates: true,
+    useUrlPatternMatching: true,
     compressStorage: true,
     storageLimit: 100,
     defaultTemplate: ''
@@ -1913,6 +2022,51 @@ function escapeHtml(unsafe) {
     .replace(/'/g, "&#039;");
 }
 
+// Debug function to test URL pattern matching
+window.testUrlPatternMatch = async function(testUrl) {
+  console.log('\n=== Testing URL Pattern Match ===');
+  console.log('Test URL:', testUrl);
+  
+  // Generate pattern for this URL
+  const generatedPattern = generateUrlPattern(testUrl);
+  console.log('Generated pattern:', generatedPattern);
+  
+  // Get templates from storage
+  const result = await chrome.storage.local.get(['templatePatterns']);
+  const templates = result.templatePatterns || [];
+  console.log('Total templates in storage:', templates.length);
+  
+  // Check each template
+  templates.forEach(template => {
+    console.log(`\nTemplate: ${template.name}`);
+    console.log('Active:', template.isActive);
+    console.log('Patterns:', template.urlPatterns);
+    
+    if (template.urlPatterns && template.urlPatterns.length > 0) {
+      template.urlPatterns.forEach(pattern => {
+        const matches = matchUrlPattern(testUrl, pattern);
+        console.log(`Pattern "${pattern}" matches: ${matches}`);
+      });
+    }
+  });
+  
+  // Also test in background script
+  console.log('\nTesting with background script...');
+  const response = await chrome.runtime.sendMessage({ 
+    action: 'getHarvesterTargetUrls' 
+  });
+  console.log('Harvester target URLs count:', response.urls ? response.urls.length : 0);
+  
+  // Check if our test URL is in collected URLs
+  const allUrlsResponse = await chrome.runtime.sendMessage({ 
+    action: 'getAllUrls' 
+  });
+  const isCollected = allUrlsResponse.urls && allUrlsResponse.urls.includes(testUrl);
+  console.log('Is URL in collected URLs?', isCollected);
+  
+  return { generatedPattern, templates, isCollected };
+};
+
 // Get confidence color based on score
 function getConfidenceColor(confidence) {
   if (!confidence) return '#999';
@@ -2031,6 +2185,8 @@ function generateUrlPattern(url) {
       pattern = pattern.replace(urlObj.hostname, 'www.{domain}');
     }
     
+    console.log(`Generated pattern for ${url}: ${pattern}`);
+    
     return pattern;
   } catch (error) {
     console.error('Error generating URL pattern:', error);
@@ -2068,11 +2224,17 @@ async function syncTemplatesToChromeStorage() {
     const templatePatterns = templates.map(t => ({
       name: t.name,
       urlPatterns: t.urlPatterns || [],
-      options: t.options
+      options: t.options,
+      isActive: t.isActive !== false // Default to true for existing templates
     }));
     
     await chrome.storage.local.set({ templatePatterns });
     console.log('Synced templates to Chrome storage:', templatePatterns);
+    
+    // Debug: Log the patterns for verification
+    templatePatterns.forEach(t => {
+      console.log(`Template: ${t.name}, Active: ${t.isActive}, Patterns:`, t.urlPatterns);
+    });
   } catch (error) {
     console.error('Error syncing templates:', error);
   }
@@ -2085,6 +2247,9 @@ async function findMatchingTemplate(url) {
     const templates = result.templatePatterns || [];
     
     for (const template of templates) {
+      // Skip inactive templates
+      if (!template.isActive) continue;
+      
       if (template.urlPatterns && template.urlPatterns.length > 0) {
         for (const pattern of template.urlPatterns) {
           if (matchUrlPattern(url, pattern)) {
@@ -2275,17 +2440,10 @@ function exportExtractionConfig() {
       </details>
       
       <div style="margin-top: 20px;">
-        <button onclick="navigator.clipboard.writeText(JSON.stringify(${JSON.stringify(extractionConfig)}, null, 2)).then(() => alert('Configuration copied to clipboard!'))">
+        <button id="copyConfigBtn">
           Copy Configuration
         </button>
-        <button onclick="
-          const blob = new Blob([JSON.stringify(${JSON.stringify(extractionConfig)}, null, 2)], {type: 'application/json'});
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = 'extraction-config.json';
-          a.click();
-        ">
+        <button id="downloadConfigBtn">
           Download as JSON
         </button>
       </div>
@@ -2318,6 +2476,31 @@ function exportExtractionConfig() {
     </html>
   `);
   
+  // Add event listeners after window loads
+  configWindow.addEventListener('DOMContentLoaded', () => {
+    const copyBtn = configWindow.document.getElementById('copyConfigBtn');
+    const downloadBtn = configWindow.document.getElementById('downloadConfigBtn');
+    
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        configWindow.navigator.clipboard.writeText(JSON.stringify(extractionConfig, null, 2)).then(() => {
+          configWindow.alert('Configuration copied to clipboard!');
+        });
+      });
+    }
+    
+    if (downloadBtn) {
+      downloadBtn.addEventListener('click', () => {
+        const blob = new Blob([JSON.stringify(extractionConfig, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = configWindow.document.createElement('a');
+        a.href = url;
+        a.download = 'extraction-config.json';
+        a.click();
+      });
+    }
+  });
+  
   showStatus('Extraction configuration opened in new window', 'success');
 }
 
@@ -2340,22 +2523,42 @@ async function loadTemplatesList() {
     let html = '<div style="padding: 10px;">';
     html += '<table style="width: 100%; border-collapse: collapse;">';
     html += '<thead><tr style="border-bottom: 2px solid #ddd;">';
+    html += '<th style="text-align: left; padding: 8px;">Status</th>';
     html += '<th style="text-align: left; padding: 8px;">Name</th>';
     html += '<th style="text-align: left; padding: 8px;">URL Patterns</th>';
+    html += '<th style="text-align: center; padding: 8px;">Pages to Harvest</th>';
+    html += '<th style="text-align: center; padding: 8px;">Pages Harvested</th>';
     html += '<th style="text-align: left; padding: 8px;">Created</th>';
     html += '<th style="text-align: right; padding: 8px;">Actions</th>';
     html += '</tr></thead><tbody>';
     
-    templates.forEach(template => {
+    // Calculate stats for each template
+    const templateStats = await Promise.all(templates.map(async template => {
+      const stats = await calculatePagesToHarvestForTemplate(template.urlPatterns);
+      return { ...template, ...stats };
+    }));
+    
+    templateStats.forEach(template => {
       const created = new Date(template.created).toLocaleDateString();
       const patterns = template.urlPatterns || [];
       const patternsDisplay = patterns.length > 0 
         ? patterns.map(p => `<code style="background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 11px;">${p}</code>`).join('<br>')
         : '<span style="color: #999; font-size: 12px;">No patterns</span>';
       
+      const isActive = template.isActive !== false; // Default to true
+      const statusColor = isActive ? '#4CAF50' : '#999';
+      const statusText = isActive ? 'Active' : 'Inactive';
+      
       html += `<tr style="border-bottom: 1px solid #eee;">`;
+      html += `<td style="padding: 8px;">`;
+      html += `<button class="toggle-template-status" data-name="${template.name}" data-active="${isActive}" `;
+      html += `style="padding: 4px 8px; background: ${statusColor}; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 11px; width: 60px;">`;
+      html += `${statusText}</button>`;
+      html += `</td>`;
       html += `<td style="padding: 8px; font-weight: bold;">${template.name}</td>`;
       html += `<td style="padding: 8px;">${patternsDisplay}</td>`;
+      html += `<td style="padding: 8px; text-align: center; color: #2196F3; font-weight: bold;">${template.toHarvest || 0}</td>`;
+      html += `<td style="padding: 8px; text-align: center; color: #4CAF50; font-weight: bold;">${template.harvested || 0}</td>`;
       html += `<td style="padding: 8px; color: #666; font-size: 12px;">${created}</td>`;
       html += `<td style="padding: 8px; text-align: right;">`;
       html += `<button class="apply-template" data-name="${template.name}" style="padding: 4px 8px; margin: 0 2px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer;">Apply</button>`;
@@ -2380,6 +2583,15 @@ async function loadTemplatesList() {
         if (confirm(`Delete template "${templateName}"?`)) {
           await deleteTemplate(templateName);
         }
+      });
+    });
+    
+    // Add event listeners for toggle status buttons
+    container.querySelectorAll('.toggle-template-status').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const templateName = e.target.dataset.name;
+        const currentActive = e.target.dataset.active === 'true';
+        await toggleTemplateStatus(templateName, !currentActive);
       });
     });
     
@@ -2429,6 +2641,37 @@ async function deleteTemplate(templateName) {
   } catch (error) {
     console.error('Error deleting template:', error);
     showStatus('Error deleting template', 'error');
+  }
+}
+
+async function toggleTemplateStatus(templateName, newActiveStatus) {
+  try {
+    await initializeHTMLStorage();
+    const templates = await htmlStorage.getTemplates();
+    const template = templates.find(t => t.name === templateName);
+    
+    if (!template) {
+      showStatus('Template not found', 'error');
+      return;
+    }
+    
+    // Update the template's active status
+    template.isActive = newActiveStatus;
+    
+    // Delete and re-save the template (since we don't have an update method)
+    await htmlStorage.deleteTemplate(templateName);
+    await htmlStorage.saveTemplate(template);
+    
+    // Sync to Chrome storage
+    await syncTemplatesToChromeStorage();
+    
+    // Refresh the display
+    await loadTemplatesList();
+    
+    showStatus(`Template "${templateName}" is now ${newActiveStatus ? 'active' : 'inactive'}`, 'success');
+  } catch (error) {
+    console.error('Error toggling template status:', error);
+    showStatus('Error updating template status', 'error');
   }
 }
 
@@ -2511,115 +2754,311 @@ function openTemplateManager() {
   `);
 }
 
-// URL Pattern Generation and Matching Functions
-function generateUrlPattern(url) {
+// Harvester Auto-Browse Functions
+async function startHarvesterAutoBrowse() {
   try {
-    const urlObj = new URL(url);
-    const domain = urlObj.hostname.replace('www.', '');
-    const pathParts = urlObj.pathname.split('/').filter(part => part);
+    const response = await chrome.runtime.sendMessage({ action: 'startHarvesterAutoBrowse' });
     
-    // Start with the protocol and domain placeholder
-    let pattern = `https://{domain}`;
-    
-    // Analyze path segments
-    pathParts.forEach((part, index) => {
-      // Check if it's a numeric ID
-      if (/^\d+$/.test(part)) {
-        pattern += '/{id}';
-      }
-      // Check if it's a slug (contains letters and possibly hyphens/underscores)
-      else if (/^[a-z0-9-_]+$/i.test(part)) {
-        // First segment might be a category
-        if (index === 0) {
-          pattern += `/${part}`; // Keep literal for first segment (e.g., 'agency', 'company')
-        } else {
-          pattern += '/{slug}';
-        }
-      }
-      // Otherwise use wildcard
-      else {
-        pattern += '/{*}';
-      }
-    });
-    
-    return pattern;
+    if (response.success) {
+      showStatus(`Started harvester auto-browse with ${response.urlCount} URLs`, 'success');
+      updateHarvesterAutoBrowseUI();
+    } else {
+      showStatus(response.message || 'Failed to start harvester auto-browse', 'error');
+    }
   } catch (error) {
-    console.error('Error generating URL pattern:', error);
-    return '';
+    console.error('Error starting harvester auto-browse:', error);
+    showStatus('Error starting harvester auto-browse', 'error');
   }
 }
 
-// Match a URL against a pattern
-function matchUrlPattern(url, pattern) {
+async function stopHarvesterAutoBrowse() {
   try {
-    const urlObj = new URL(url);
-    const urlDomain = urlObj.hostname.replace('www.', '');
-    const urlPath = urlObj.pathname;
+    const response = await chrome.runtime.sendMessage({ action: 'stopHarvesterAutoBrowse' });
     
-    // Replace pattern variables with regex
-    let regexPattern = pattern
-      .replace('{domain}', '([^/]+)')
-      .replace(/{id}/g, '(\\d+)')
-      .replace(/{slug}/g, '([a-z0-9-_]+)')
-      .replace(/{\\*}/g, '([^/]+)');
-    
-    // Build full regex
-    const fullPattern = `^https?://(?:www\\.)?${regexPattern}/?$`;
-    const regex = new RegExp(fullPattern, 'i');
-    
-    // Test the full URL
-    return regex.test(url);
+    if (response.success) {
+      showStatus('Stopped harvester auto-browse', 'success');
+      updateHarvesterAutoBrowseUI();
+    }
   } catch (error) {
-    console.error('Error matching URL pattern:', error);
-    return false;
+    console.error('Error stopping harvester auto-browse:', error);
+    showStatus('Error stopping harvester auto-browse', 'error');
   }
 }
 
-// Find matching template for a URL
-async function findMatchingTemplate(url) {
+async function previewHarvesterUrls() {
   try {
-    await initializeHTMLStorage();
-    const templates = await htmlStorage.getTemplates();
+    const response = await chrome.runtime.sendMessage({ action: 'getHarvesterTargetUrls' });
     
-    // Find templates with URL patterns
-    for (const template of templates) {
-      if (template.urlPatterns && template.urlPatterns.length > 0) {
-        for (const pattern of template.urlPatterns) {
-          if (matchUrlPattern(url, pattern)) {
-            return template;
-          }
-        }
-      }
+    if (response.urls && response.urls.length > 0) {
+      // Create a preview window
+      const previewWindow = window.open('', 'HarvesterURLsPreview', 'width=800,height=600');
+      previewWindow.document.write(`
+        <html>
+          <head>
+            <title>Harvester Target URLs</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 20px; }
+              h1 { color: #333; }
+              .url-list { 
+                max-height: 500px; 
+                overflow-y: auto; 
+                border: 1px solid #ddd; 
+                padding: 10px;
+                background: #f5f5f5;
+              }
+              .url-item { 
+                padding: 5px; 
+                border-bottom: 1px solid #eee; 
+                font-family: monospace;
+                font-size: 12px;
+              }
+              .summary { 
+                background: #e3f2fd; 
+                padding: 15px; 
+                border-radius: 5px; 
+                margin-bottom: 20px;
+              }
+            </style>
+          </head>
+          <body>
+            <h1>URLs Matching Active Template Patterns</h1>
+            <div class="summary">
+              <strong>Total URLs: ${response.count}</strong><br>
+              These URLs match the patterns defined in your active templates.
+            </div>
+            <div class="url-list">
+              ${response.urls.map(url => `<div class="url-item">${url}</div>`).join('')}
+            </div>
+          </body>
+        </html>
+      `);
+    } else {
+      showStatus('No URLs found matching active template patterns', 'info');
+    }
+  } catch (error) {
+    console.error('Error previewing harvester URLs:', error);
+    showStatus('Error loading harvester URLs', 'error');
+  }
+}
+
+async function updateHarvesterAutoBrowseUI() {
+  try {
+    // Get harvester state
+    const state = await chrome.runtime.sendMessage({ action: 'getHarvesterAutoBrowseState' });
+    
+    // Update status
+    const statusElement = document.getElementById('harvesterStatus');
+    const startBtn = document.getElementById('startHarvesterAutoBrowse');
+    const stopBtn = document.getElementById('stopHarvesterAutoBrowse');
+    
+    if (state.enabled) {
+      statusElement.textContent = 'Running';
+      statusElement.style.color = '#4CAF50';
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+    } else {
+      statusElement.textContent = 'Not Running';
+      statusElement.style.color = '#999';
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
     }
     
-    return null;
+    // Update progress
+    document.getElementById('harvesterProgress').textContent = 
+      `${state.currentIndex}/${state.queuedCount}`;
+    
+    // Update stats
+    document.getElementById('harvesterSuccessCount').textContent = 
+      state.stats.successfulHarvests || 0;
+    document.getElementById('harvesterFailedCount').textContent = 
+      state.stats.failedHarvests || 0;
+    document.getElementById('harvesterPendingCount').textContent = 
+      state.queuedCount - state.currentIndex || 0;
+    
+    // Get matching URL count
+    const urlResponse = await chrome.runtime.sendMessage({ action: 'getHarvesterTargetUrls' });
+    document.getElementById('matchingUrlCount').textContent = urlResponse.count || 0;
+    
+    // Update active templates list
+    await updateActiveTemplatesList();
+    
   } catch (error) {
-    console.error('Error finding matching template:', error);
-    return null;
+    console.error('Error updating harvester UI:', error);
   }
 }
 
-// Make updateStripperOptions available globally
-window.updateStripperOptions = updateStripperOptions;
-
-// Sync templates to Chrome storage for background script access
-async function syncTemplatesToChromeStorage() {
+async function updateActiveTemplatesList() {
   try {
     await initializeHTMLStorage();
     const templates = await htmlStorage.getTemplates();
+    const activeTemplates = templates.filter(t => t.isActive !== false && t.urlPatterns && t.urlPatterns.length > 0);
     
-    // Extract only the necessary data for pattern matching
-    const templatePatterns = templates
-      .filter(t => t.urlPatterns && t.urlPatterns.length > 0)
-      .map(t => ({
-        name: t.name,
-        urlPatterns: t.urlPatterns,
-        options: t.options // Include options for applying the template
-      }));
+    const listElement = document.getElementById('activeTemplatesList');
     
-    await chrome.storage.local.set({ templatePatterns: templatePatterns });
-    console.log('✅ Synced template patterns to Chrome storage:', templatePatterns.length);
+    if (activeTemplates.length === 0) {
+      listElement.innerHTML = '<span style="color: #999;">No active templates with URL patterns</span>';
+    } else {
+      listElement.innerHTML = activeTemplates.map(t => 
+        `<div style="margin: 4px 0;">
+          <strong>${t.name}:</strong> 
+          <code style="background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 11px;">
+            ${t.urlPatterns.join(', ')}
+          </code>
+        </div>`
+      ).join('');
+    }
   } catch (error) {
-    console.error('Error syncing templates:', error);
+    console.error('Error loading active templates:', error);
   }
 }
+
+function listenForHarvesterUpdates() {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'harvesterAutoBrowseUpdate') {
+      updateHarvesterAutoBrowseUI();
+      showStatus(`Harvesting: ${message.currentUrl}`, 'info');
+    } else if (message.action === 'harvesterAutoBrowseComplete') {
+      updateHarvesterAutoBrowseUI();
+      showStatus('Harvester auto-browse completed!', 'success');
+    }
+  });
+}
+
+async function debugHarvesterUrls() {
+  try {
+    // Get collected data to check what URLs we have
+    const response = await chrome.runtime.sendMessage({ action: 'getData' });
+    const companies = response.companies || [];
+    const allUrls = companies.map(c => c.url);
+    
+    // Get templates
+    await initializeHTMLStorage();
+    const templates = await htmlStorage.getTemplates();
+    
+    // Create debug window
+    const debugWindow = window.open('', 'HarvesterDebug', 'width=1000,height=700');
+    
+    let debugHtml = `
+      <html>
+        <head>
+          <title>Harvester Debug Information</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            h1, h2 { color: #333; }
+            .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+            .template { background: #f5f5f5; margin: 10px 0; padding: 10px; border-radius: 3px; }
+            .url-list { max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+            .url-item { padding: 2px; border-bottom: 1px solid #eee; }
+            .active { background: #e8f5e8; }
+            .inactive { background: #f5f5f5; color: #999; }
+            pre { background: #f8f8f8; padding: 10px; border-radius: 3px; overflow-x: auto; }
+          </style>
+        </head>
+        <body>
+          <h1>Harvester Debug Information</h1>
+          
+          <div class="section">
+            <h2>Collected URLs (${allUrls.length} total)</h2>
+            <div class="url-list">
+              ${allUrls.slice(0, 20).map(url => `<div class="url-item">${url}</div>`).join('')}
+              ${allUrls.length > 20 ? `<div class="url-item">... and ${allUrls.length - 20} more</div>` : ''}
+            </div>
+          </div>
+          
+          <div class="section">
+            <h2>Templates (${templates.length} total)</h2>
+    `;
+    
+    templates.forEach(template => {
+      const isActive = template.isActive !== false;
+      const hasPatterns = template.urlPatterns && template.urlPatterns.length > 0;
+      
+      debugHtml += `
+        <div class="template ${isActive ? 'active' : 'inactive'}">
+          <strong>${template.name}</strong> - ${isActive ? 'ACTIVE' : 'INACTIVE'}
+          ${hasPatterns ? '' : ' (NO PATTERNS)'}
+          <br>
+          Patterns: ${template.urlPatterns ? template.urlPatterns.join(', ') : 'None'}
+        </div>
+      `;
+    });
+    
+    debugHtml += `
+          </div>
+          
+          <div class="section">
+            <h2>Pattern Testing</h2>
+            <p>Test a few URLs against your active template patterns:</p>
+            <div id="patternTests"></div>
+            <script>
+              // Test pattern matching
+              const testUrls = ${JSON.stringify(allUrls.slice(0, 10))};
+              const templates = ${JSON.stringify(templates.filter(t => t.isActive !== false && t.urlPatterns))};
+              
+              let testsHtml = '';
+              
+              testUrls.forEach(url => {
+                testsHtml += '<h4>' + url + '</h4>';
+                let matched = false;
+                
+                templates.forEach(template => {
+                  if (template.urlPatterns) {
+                    template.urlPatterns.forEach(pattern => {
+                      // Simple pattern test (not perfect but gives an idea)
+                      let regexPattern = pattern
+                        .replace(/\\\\./g, '\\\\.')
+                        .replace(/\\\\//g, '\\\\/')
+                        .replace(/\\{domain\\}/g, '[^/]+')
+                        .replace(/\\{id\\}/g, '\\\\d+')
+                        .replace(/\\{slug\\}/g, '[a-z0-9-_]+')
+                        .replace(/\\{\\*\\}/g, '[^/]+');
+                        
+                      try {
+                        const regex = new RegExp('^' + regexPattern + '/?$', 'i');
+                        const matches = regex.test(url);
+                        
+                        testsHtml += '<div style="margin-left: 20px;">';
+                        testsHtml += (matches ? '✅' : '❌') + ' ' + template.name + ': ' + pattern;
+                        testsHtml += '<br><small>Regex: ^' + regexPattern + '/?$</small>';
+                        testsHtml += '</div>';
+                        
+                        if (matches) matched = true;
+                      } catch (e) {
+                        testsHtml += '<div style="margin-left: 20px; color: red;">❌ ' + template.name + ': ERROR - ' + e.message + '</div>';
+                      }
+                    });
+                  }
+                });
+                
+                if (!matched) {
+                  testsHtml += '<div style="color: #999; margin-left: 20px;">No templates match this URL</div>';
+                }
+                testsHtml += '<br>';
+              });
+              
+              document.getElementById('patternTests').innerHTML = testsHtml;
+            </script>
+          </div>
+          
+          <div class="section">
+            <h2>Troubleshooting Steps</h2>
+            <ol>
+              <li>Check if you have active templates with URL patterns</li>
+              <li>Verify your URL patterns match the collected URLs</li>
+              <li>Make sure your Sortlist template is marked as Active</li>
+              <li>Check the browser console for detailed matching logs</li>
+              <li>Try making your patterns more generic (e.g., use {*} instead of {slug})</li>
+            </ol>
+          </div>
+        </body>
+      </html>
+    `;
+    
+    debugWindow.document.write(debugHtml);
+    
+  } catch (error) {
+    console.error('Error creating debug info:', error);
+    showStatus('Error creating debug info', 'error');
+  }
+}
+
