@@ -293,6 +293,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: true });
       break;
       
+    case 'getStealthMetrics':
+      sendResponse(getStealthMetrics());
+      break;
+      
+    case 'getCurrentUserAgent':
+      sendResponse({ 
+        userAgent: (typeof StealthUtils !== 'undefined' && StealthUtils) ? 
+          StealthUtils.getSessionUserAgent() : 
+          navigator.userAgent 
+      });
+      break;
+      
+    case 'getProxyStatus':
+      getProxyStatus().then(status => sendResponse(status));
+      break;
+      
     default:
       console.log('Unknown action:', request.action);
       sendResponse({ error: 'Unknown action' });
@@ -965,6 +981,9 @@ function handleBlockingDetection(request) {
   const log = (typeof StealthUtils !== 'undefined' && StealthUtils) ? StealthUtils.stealthLog : console;
   log.warn('🚫 Blocking detected:', request);
   
+  // Track the block
+  stealthMetrics.blocksDetected++;
+  
   // Stop auto-browse if running
   if (autoBrowseState.enabled) {
     log.info('Pausing auto-browse due to blocking detection');
@@ -998,5 +1017,144 @@ function handleBlockingDetection(request) {
     updateBadge();
   }, 30000);
 }
+
+// Stealth metrics tracking
+let stealthMetrics = {
+  totalRequests: 0,
+  successfulRequests: 0,
+  blocksDetected: 0,
+  requestsPerHour: 0,
+  lastHourRequests: []
+};
+
+function getStealthMetrics() {
+  // Calculate requests per hour
+  const now = Date.now();
+  const oneHourAgo = now - (60 * 60 * 1000);
+  stealthMetrics.lastHourRequests = stealthMetrics.lastHourRequests.filter(time => time > oneHourAgo);
+  stealthMetrics.requestsPerHour = stealthMetrics.lastHourRequests.length;
+  
+  return stealthMetrics;
+}
+
+function trackRequest(success = true) {
+  stealthMetrics.totalRequests++;
+  if (success) {
+    stealthMetrics.successfulRequests++;
+  }
+  stealthMetrics.lastHourRequests.push(Date.now());
+  
+  // Clean up old entries
+  const oneHourAgo = Date.now() - (60 * 60 * 1000);
+  stealthMetrics.lastHourRequests = stealthMetrics.lastHourRequests.filter(time => time > oneHourAgo);
+}
+
+async function getProxyStatus() {
+  const settings = await getSettings();
+  
+  if (settings.enableProxy && settings.proxyHost && settings.proxyPort) {
+    const proxy = `${settings.proxyType}://${settings.proxyHost}:${settings.proxyPort}`;
+    return {
+      enabled: true,
+      proxy: proxy,
+      rotating: settings.rotateProxies
+    };
+  }
+  
+  return { enabled: false };
+}
+
+// Enhanced browseNextUrl with delay tracking
+async function browseNextUrlEnhanced() {
+  const log = (typeof StealthUtils !== 'undefined' && StealthUtils) ? StealthUtils.stealthLog : console;
+  const unvisitedUrls = getUnvisitedUrls();
+  
+  if (unvisitedUrls.length === 0) {
+    log.log('No more unvisited URLs');
+    stopAutoBrowse();
+    
+    chrome.runtime.sendMessage({
+      action: 'autoBrowseComplete',
+      message: 'All URLs have been visited!'
+    }).catch(() => {});
+    
+    return;
+  }
+  
+  const company = unvisitedUrls[0];
+  const isCollection = isCollectionUrl(company.url);
+  
+  // Calculate and send next request delay
+  let totalDelay = autoBrowseState.interval;
+  if (rateLimiter) {
+    try {
+      const urlObj = new URL(company.url);
+      const delay = await rateLimiter.getDelay(urlObj.hostname);
+      totalDelay = Math.max(delay, autoBrowseState.interval);
+    } catch (e) {
+      log.error('Rate limiter error:', e);
+    }
+  }
+  
+  // Apply randomization to the delay
+  if (typeof StealthUtils !== 'undefined' && StealthUtils) {
+    totalDelay = StealthUtils.randomDelay(totalDelay, 0.4);
+  }
+  
+  log.log(`🤖 Auto-browsing ${isCollection ? '🏷️ COLLECTION' : '📄 individual'} page:`, company.url, `(${autoBrowseState.visitedUrls.size + 1}/${collectedData.companies.length})`);
+  
+  try {
+    const normalizedUrl = normalizeUrl(company.url);
+    autoBrowseState.visitedUrls.add(normalizedUrl);
+    trackRequest(true);
+    
+    const isSortlistUrl = company.url.includes('sortlist.com') || 
+                         company.url.includes('sortlist.be') || 
+                         company.url.includes('sortlist.fr') || 
+                         company.url.includes('sortlist.co.uk') || 
+                         company.url.includes('sortlist.us');
+    
+    const tab = await chrome.tabs.create({
+      url: company.url,
+      active: false
+    });
+    
+    console.log('📄 Opened tab:', tab.id, 'for URL:', company.url);
+    
+    // Send update with next request delay
+    chrome.runtime.sendMessage({
+      action: 'autoBrowseUpdate',
+      currentUrl: company.url,
+      visitedCount: autoBrowseState.visitedUrls.size,
+      unvisitedCount: unvisitedUrls.length - 1,
+      tabId: tab.id,
+      progress: `${autoBrowseState.visitedUrls.size}/${collectedData.companies.length}`,
+      isCollection: isCollection,
+      pageType: isCollection ? 'Collection' : 'Individual',
+      nextRequestDelay: totalDelay // Send the delay for countdown
+    }).catch(() => {});
+    
+    const tabDuration = (typeof StealthUtils !== 'undefined' && StealthUtils) ? 
+      StealthUtils.randomDelay(15000, 0.4) : 15000;
+    
+    setTimeout(async () => {
+      try {
+        log.log('🗑️ Closing auto-browse tab:', tab.id, `after ${tabDuration}ms`);
+        await chrome.tabs.remove(tab.id);
+      } catch (e) {
+        log.log('Tab already closed:', tab.id);
+      }
+    }, tabDuration);
+    
+  } catch (error) {
+    console.error('Error auto-browsing URL:', error);
+    trackRequest(false);
+    const normalizedUrl = normalizeUrl(company.url);
+    autoBrowseState.visitedUrls.add(normalizedUrl);
+  }
+}
+
+// Replace the original browseNextUrl function
+browseNextUrl = browseNextUrlEnhanced;
 
 console.log('Background script initialized with intelligent site mapping and stealth features');

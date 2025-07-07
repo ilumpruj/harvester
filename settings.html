@@ -141,6 +141,57 @@
     </div>
   </div>
   
+  <!-- Proxy Settings -->
+  <div class="setting-group">
+    <h3>🌐 Proxy Configuration</h3>
+    
+    <div class="setting-item">
+      <label for="enableProxy">Enable proxy</label>
+      <input type="checkbox" id="enableProxy">
+    </div>
+    
+    <div class="setting-item">
+      <label for="proxyType">Proxy type</label>
+      <select id="proxyType" style="width: 150px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <option value="http">HTTP</option>
+        <option value="https">HTTPS</option>
+        <option value="socks5">SOCKS5</option>
+        <option value="socks4">SOCKS4</option>
+      </select>
+    </div>
+    
+    <div class="setting-item">
+      <label for="proxyHost">Proxy host/IP</label>
+      <input type="text" id="proxyHost" placeholder="proxy.example.com" style="width: 200px;">
+    </div>
+    
+    <div class="setting-item">
+      <label for="proxyPort">Proxy port</label>
+      <input type="number" id="proxyPort" placeholder="8080" min="1" max="65535" style="width: 100px;">
+    </div>
+    
+    <div class="setting-item">
+      <label for="proxyUsername">Username (optional)</label>
+      <input type="text" id="proxyUsername" placeholder="username" style="width: 150px;">
+    </div>
+    
+    <div class="setting-item">
+      <label for="proxyPassword">Password (optional)</label>
+      <input type="password" id="proxyPassword" placeholder="password" style="width: 150px;">
+    </div>
+    
+    <div class="setting-item">
+      <label for="rotateProxies">Rotate proxies</label>
+      <input type="checkbox" id="rotateProxies">
+    </div>
+    
+    <div class="setting-item" style="display: none;" id="proxyListContainer">
+      <label for="proxyList">Proxy list (one per line)</label>
+      <textarea id="proxyList" placeholder="type://host:port&#10;socks5://proxy1.com:1080&#10;http://proxy2.com:8080" 
+                style="width: 100%; height: 100px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace; font-size: 12px;"></textarea>
+    </div>
+  </div>
+  
   <div class="setting-group">
     <h3>Auto-Save Options</h3>
     

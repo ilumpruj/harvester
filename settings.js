@@ -10,6 +10,15 @@ const defaultSettings = {
   enableHumanSimulation: true,
   enableRateLimiting: true,
   maxRequestsPerHour: 100,
+  // Proxy settings
+  enableProxy: false,
+  proxyType: 'http',
+  proxyHost: '',
+  proxyPort: '',
+  proxyUsername: '',
+  proxyPassword: '',
+  rotateProxies: false,
+  proxyList: '',
   // Original settings
   autoSave: true,
   autoSaveInterval: 30,
@@ -35,6 +44,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('enableHumanSimulation').checked = settings.enableHumanSimulation;
   document.getElementById('enableRateLimiting').checked = settings.enableRateLimiting;
   document.getElementById('maxRequestsPerHour').value = settings.maxRequestsPerHour;
+  // Proxy settings
+  document.getElementById('enableProxy').checked = settings.enableProxy;
+  document.getElementById('proxyType').value = settings.proxyType;
+  document.getElementById('proxyHost').value = settings.proxyHost;
+  document.getElementById('proxyPort').value = settings.proxyPort;
+  document.getElementById('proxyUsername').value = settings.proxyUsername;
+  document.getElementById('proxyPassword').value = settings.proxyPassword;
+  document.getElementById('rotateProxies').checked = settings.rotateProxies;
+  document.getElementById('proxyList').value = settings.proxyList;
   // Original settings
   document.getElementById('autoSave').checked = settings.autoSave;
   document.getElementById('autoSaveInterval').value = settings.autoSaveInterval;
@@ -45,6 +63,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('savePageHTML').checked = settings.savePageHTML;
   document.getElementById('enableServer').checked = settings.enableServer;
   document.getElementById('serverUrl').value = settings.serverUrl;
+  
+  // Show/hide proxy list based on rotate proxies setting
+  toggleProxyListVisibility();
 });
 
 // Save settings
@@ -58,6 +79,15 @@ document.getElementById('saveSettings').addEventListener('click', async () => {
     enableHumanSimulation: document.getElementById('enableHumanSimulation').checked,
     enableRateLimiting: document.getElementById('enableRateLimiting').checked,
     maxRequestsPerHour: parseInt(document.getElementById('maxRequestsPerHour').value),
+    // Proxy settings
+    enableProxy: document.getElementById('enableProxy').checked,
+    proxyType: document.getElementById('proxyType').value,
+    proxyHost: document.getElementById('proxyHost').value,
+    proxyPort: document.getElementById('proxyPort').value,
+    proxyUsername: document.getElementById('proxyUsername').value,
+    proxyPassword: document.getElementById('proxyPassword').value,
+    rotateProxies: document.getElementById('rotateProxies').checked,
+    proxyList: document.getElementById('proxyList').value,
     // Original settings
     autoSave: document.getElementById('autoSave').checked,
     autoSaveInterval: parseInt(document.getElementById('autoSaveInterval').value),
@@ -98,3 +128,15 @@ function showStatus(message, type) {
     status.style.display = 'none';
   }, 3000);
 }
+
+// Toggle proxy list visibility
+function toggleProxyListVisibility() {
+  const rotateProxies = document.getElementById('rotateProxies').checked;
+  const proxyListContainer = document.getElementById('proxyListContainer');
+  proxyListContainer.style.display = rotateProxies ? 'block' : 'none';
+}
+
+// Add event listener for rotate proxies checkbox
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('rotateProxies').addEventListener('change', toggleProxyListVisibility);
+});

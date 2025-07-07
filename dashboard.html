@@ -498,6 +498,37 @@
           </ul>
         </div>
         
+        <!-- Stealth Status Panel -->
+        <div style="margin-top: 30px; background: #1a1a1a; padding: 20px; border-radius: 10px; color: #0f0;">
+          <h3 style="color: #0f0; margin-bottom: 15px;">🥷 Stealth Status</h3>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+            <div style="background: #2a2a2a; padding: 15px; border-radius: 8px; border: 1px solid #0f0;">
+              <div style="font-size: 12px; color: #888; margin-bottom: 5px;">Next Request In</div>
+              <div id="stealthCountdown" style="font-size: 24px; font-weight: bold; font-family: monospace;">--:--</div>
+              <div style="font-size: 11px; color: #666; margin-top: 5px;">Base: <span id="baseDelay">30s</span> • Randomized: <span id="randomizedDelay">--s</span></div>
+            </div>
+            <div style="background: #2a2a2a; padding: 15px; border-radius: 8px; border: 1px solid #0f0;">
+              <div style="font-size: 12px; color: #888; margin-bottom: 5px;">Current User Agent</div>
+              <div id="currentUserAgent" style="font-size: 11px; font-family: monospace; word-break: break-all; max-height: 60px; overflow-y: auto;">Not set</div>
+            </div>
+            <div style="background: #2a2a2a; padding: 15px; border-radius: 8px; border: 1px solid #0f0;">
+              <div style="font-size: 12px; color: #888; margin-bottom: 5px;">Proxy Status</div>
+              <div id="proxyStatus" style="font-size: 14px;">
+                <span style="color: #f00;">● Disabled</span>
+              </div>
+              <div style="font-size: 11px; color: #666; margin-top: 5px;">Configure in settings</div>
+            </div>
+            <div style="background: #2a2a2a; padding: 15px; border-radius: 8px; border: 1px solid #0f0;">
+              <div style="font-size: 12px; color: #888; margin-bottom: 5px;">Stealth Metrics</div>
+              <div style="font-size: 11px;">
+                <div>Requests/Hour: <span id="requestsPerHour" style="color: #0f0;">0</span>/<span id="maxRequestsPerHour">100</span></div>
+                <div>Blocks Detected: <span id="blocksDetected" style="color: #f00;">0</span></div>
+                <div>Success Rate: <span id="successRate" style="color: #0f0;">100%</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
         <!-- Activity Log -->
         <div style="margin-top: 30px;">
           <h3>📋 Activity Log</h3>

@@ -5,6 +5,16 @@ let collectionChart;
 let allCompanies = [];
 let autoBrowseState = null;
 
+// Pagination state
+let currentPage = 1;
+let itemsPerPage = 20;
+let filteredCompanies = [];
+
+// Stealth status state
+let countdownInterval = null;
+let nextRequestTime = null;
+let stealthSettings = null;
+
 // Initialize dashboard
 document.addEventListener('DOMContentLoaded', () => {
   initializeChart();
@@ -42,6 +52,11 @@ function listenForUpdates() {
       
       addToActivityLog(`${pageIcon} Visiting ${pageType}: ${message.currentUrl} (${message.progress})`);
       showStatus(`${pageIcon} Visiting ${pageType} ${message.progress}: ${message.currentUrl.substring(0, 40)}...`, 'success');
+      
+      // Update stealth countdown when a new request starts
+      if (message.nextRequestDelay) {
+        startStealthCountdown(message.nextRequestDelay);
+      }
     } else if (message.action === 'autoBrowseComplete') {
       console.log('🎉 Auto-browse completed');
       addToActivityLog('🎉 Auto-browse completed! All URLs visited.');
@@ -165,7 +180,7 @@ function updateChart(data) {
   collectionChart.update();
 }
 
-// Render companies table
+// Render companies table with pagination
 function renderCompaniesTable(companies) {
   const tbody = document.getElementById('companiesBody');
   const emptyState = document.getElementById('emptyState');
@@ -173,15 +188,33 @@ function renderCompaniesTable(companies) {
   if (companies.length === 0) {
     tbody.innerHTML = '';
     emptyState.style.display = 'block';
+    hidePaginationControls();
     return;
   }
   
   emptyState.style.display = 'none';
   
-  // Sort by most recent first
-  const sortedCompanies = [...companies].reverse();
+  // Store filtered companies for pagination
+  filteredCompanies = [...companies].reverse(); // Sort by most recent first
   
-  tbody.innerHTML = sortedCompanies.map(company => `
+  // Calculate pagination
+  const totalPages = Math.ceil(filteredCompanies.length / itemsPerPage);
+  
+  // Ensure current page is valid
+  if (currentPage > totalPages) {
+    currentPage = totalPages;
+  }
+  if (currentPage < 1) {
+    currentPage = 1;
+  }
+  
+  // Get companies for current page
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const companiesForPage = filteredCompanies.slice(startIndex, endIndex);
+  
+  // Render table
+  tbody.innerHTML = companiesForPage.map(company => `
     <tr>
       <td class="company-name">${company.name || 'Unknown'}</td>
       <td>
@@ -198,6 +231,9 @@ function renderCompaniesTable(companies) {
       </td>
     </tr>
   `).join('');
+  
+  // Update pagination controls
+  updatePaginationControls(totalPages);
 }
 
 // Setup event listeners
@@ -308,6 +344,9 @@ function setupEventListeners() {
   // Search functionality
   document.getElementById('searchBox').addEventListener('input', (e) => {
     const searchTerm = e.target.value.toLowerCase();
+    
+    // Reset to first page when searching
+    currentPage = 1;
     
     if (!searchTerm) {
       renderCompaniesTable(allCompanies);
@@ -440,6 +479,17 @@ function setupAutoBrowse() {
   
   // Update stats initially
   updateAutoBrowseStats();
+  
+  // Load stealth settings and start updates
+  loadStealthSettings();
+  updateUserAgent();
+  updateStealthMetrics();
+  
+  // Update stealth metrics periodically
+  setInterval(() => {
+    updateStealthMetrics();
+    updateUserAgent();
+  }, 5000);
 }
 
 function updateAutoBrowseStats() {
@@ -938,5 +988,191 @@ function setupIntelligence() {
   });
 }
 
-// Make copyUrl available globally
+// Pagination control functions
+function updatePaginationControls(totalPages) {
+  let paginationContainer = document.getElementById('paginationControls');
+  if (!paginationContainer) {
+    // Create pagination container if it doesn't exist
+    const companiesTable = document.querySelector('.companies-table');
+    if (!companiesTable) {
+      console.error('Companies table not found');
+      return;
+    }
+    const paginationDiv = document.createElement('div');
+    paginationDiv.id = 'paginationControls';
+    paginationDiv.style.cssText = 'display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px; padding: 10px;';
+    companiesTable.appendChild(paginationDiv);
+    paginationContainer = paginationDiv;
+  }
+  
+  if (totalPages <= 1) {
+    paginationContainer.style.display = 'none';
+    return;
+  }
+  
+  paginationContainer.style.display = 'flex';
+  
+  // Build pagination HTML
+  let paginationHTML = '';
+  
+  // Previous button
+  paginationHTML += `
+    <button class="btn-secondary" onclick="changePage(${currentPage - 1})" 
+            ${currentPage === 1 ? 'disabled' : ''} 
+            style="padding: 5px 10px; font-size: 12px;">
+      ← Previous
+    </button>
+  `;
+  
+  // Page info
+  paginationHTML += `
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="font-size: 14px;">
+        Page ${currentPage} of ${totalPages}
+      </span>
+      <span style="color: #666; font-size: 12px;">
+        (${filteredCompanies.length} total companies)
+      </span>
+    </div>
+  `;
+  
+  // Items per page selector
+  paginationHTML += `
+    <select id="itemsPerPageSelect" onchange="changeItemsPerPage(this.value)" 
+            style="padding: 5px; font-size: 12px; border: 1px solid #ddd; border-radius: 4px;">
+      <option value="10" ${itemsPerPage === 10 ? 'selected' : ''}>10 per page</option>
+      <option value="20" ${itemsPerPage === 20 ? 'selected' : ''}>20 per page</option>
+      <option value="50" ${itemsPerPage === 50 ? 'selected' : ''}>50 per page</option>
+      <option value="100" ${itemsPerPage === 100 ? 'selected' : ''}>100 per page</option>
+    </select>
+  `;
+  
+  // Next button
+  paginationHTML += `
+    <button class="btn-secondary" onclick="changePage(${currentPage + 1})" 
+            ${currentPage === totalPages ? 'disabled' : ''}
+            style="padding: 5px 10px; font-size: 12px;">
+      Next →
+    </button>
+  `;
+  
+  paginationContainer.innerHTML = paginationHTML;
+}
+
+function hidePaginationControls() {
+  const container = document.getElementById('paginationControls');
+  if (container) {
+    container.style.display = 'none';
+  }
+}
+
+function changePage(page) {
+  currentPage = page;
+  renderCompaniesTable(filteredCompanies.length > 0 ? filteredCompanies : allCompanies);
+}
+
+function changeItemsPerPage(value) {
+  itemsPerPage = parseInt(value);
+  currentPage = 1; // Reset to first page
+  renderCompaniesTable(filteredCompanies.length > 0 ? filteredCompanies : allCompanies);
+}
+
+// Stealth status functions
+function loadStealthSettings() {
+  chrome.storage.sync.get({ settings: {} }, (result) => {
+    stealthSettings = result.settings;
+    updateStealthDisplay();
+  });
+}
+
+function updateStealthDisplay() {
+  if (!stealthSettings) return;
+  
+  // Update max requests per hour
+  document.getElementById('maxRequestsPerHour').textContent = stealthSettings.maxRequestsPerHour || 100;
+  
+  // Update base delay
+  const baseDelay = stealthSettings.minDelay || 30;
+  document.getElementById('baseDelay').textContent = `${baseDelay}s`;
+  
+  // Update proxy status
+  updateProxyStatus();
+}
+
+function updateProxyStatus() {
+  chrome.runtime.sendMessage({ action: 'getProxyStatus' }, (response) => {
+    const proxyStatusEl = document.getElementById('proxyStatus');
+    if (response && response.enabled) {
+      proxyStatusEl.innerHTML = `<span style="color: #0f0;">● Active</span><br><span style="font-size: 11px;">${response.proxy}</span>`;
+    } else {
+      proxyStatusEl.innerHTML = '<span style="color: #f00;">● Disabled</span>';
+    }
+  });
+}
+
+function startStealthCountdown(totalDelay) {
+  // Clear existing countdown
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+  }
+  
+  // Set next request time
+  nextRequestTime = Date.now() + totalDelay;
+  
+  // Update randomized delay display
+  document.getElementById('randomizedDelay').textContent = `${Math.round(totalDelay / 1000)}s`;
+  
+  // Update countdown every 100ms for smooth display
+  countdownInterval = setInterval(updateCountdown, 100);
+  updateCountdown();
+}
+
+function updateCountdown() {
+  if (!nextRequestTime) {
+    document.getElementById('stealthCountdown').textContent = '--:--';
+    return;
+  }
+  
+  const remaining = Math.max(0, nextRequestTime - Date.now());
+  
+  if (remaining === 0) {
+    clearInterval(countdownInterval);
+    document.getElementById('stealthCountdown').textContent = '00:00';
+    return;
+  }
+  
+  const seconds = Math.floor(remaining / 1000);
+  const milliseconds = remaining % 1000;
+  const minutes = Math.floor(seconds / 60);
+  const displaySeconds = seconds % 60;
+  
+  const timeString = `${minutes.toString().padStart(2, '0')}:${displaySeconds.toString().padStart(2, '0')}.${Math.floor(milliseconds / 100)}`;
+  document.getElementById('stealthCountdown').textContent = timeString;
+}
+
+function updateStealthMetrics() {
+  chrome.runtime.sendMessage({ action: 'getStealthMetrics' }, (response) => {
+    if (response) {
+      document.getElementById('requestsPerHour').textContent = response.requestsPerHour || 0;
+      document.getElementById('blocksDetected').textContent = response.blocksDetected || 0;
+      
+      const successRate = response.totalRequests > 0 
+        ? Math.round((response.successfulRequests / response.totalRequests) * 100)
+        : 100;
+      document.getElementById('successRate').textContent = `${successRate}%`;
+    }
+  });
+}
+
+function updateUserAgent() {
+  chrome.runtime.sendMessage({ action: 'getCurrentUserAgent' }, (response) => {
+    if (response && response.userAgent) {
+      document.getElementById('currentUserAgent').textContent = response.userAgent;
+    }
+  });
+}
+
+// Make functions available globally
 window.copyUrl = copyUrl;
+window.changePage = changePage;
+window.changeItemsPerPage = changeItemsPerPage;
